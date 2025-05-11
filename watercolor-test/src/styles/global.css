@@ -1,0 +1,48 @@
+/* 基本CSS重置 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  font-family: "Arial", "PingFang SC", "Microsoft YaHei", sans-serif;
+  height: 100%;
+  width: 100%;
+}
+
+/* 设置更好的默认字体渲染 */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* 移除按钮默认样式 */
+button {
+  cursor: pointer;
+  font-family: inherit;
+  outline: none;
+  appearance: none;
+}
+
+/* 设置滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #2d2d2d;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
