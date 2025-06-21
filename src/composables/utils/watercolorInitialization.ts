@@ -50,14 +50,7 @@ export function initP5(engine: WatercolorEngine): void {
     p.mouseReleased = () => {
       engine.isDrawing = false;
       if (engine.strokeCount > 0) {
-        engine.mergeBrushColorToPigment();
-      }
-      for (let i = 0; i < engine.brushColorField.length; i++) {
-        engine.brushColorField[i] = {
-          color: [255, 255, 255] as [number, number, number],
-          opacity: 0,
-          isNew: false,
-        };
+        engine.mergeEdgesToPigment(); // 混合所有三层边缘
       }
       engine.strokeCount = 0;
     };
@@ -87,6 +80,12 @@ export function initArrays(engine: WatercolorEngine): void {
   engine.pigmentCenters = [];
   engine.edgeIntensityField.fill(0);
   engine.wetField.fill(0);
+
+  // 初始化新的边缘场
+  engine.firstLayerEdgeField.fill(0);
+  engine.secondLayerEdgeField.fill(0);
+  engine.thirdLayerEdgeField.fill(0);
+  engine.edgeMask.fill(0);
 }
 
 /**
@@ -98,8 +97,6 @@ export function initComplexArrays(
 ): void {
   engine.pigmentField = Array(size);
   engine.newPigmentField = Array(size);
-  engine.brushColorField = Array(size);
-
   for (let i = 0; i < size; i++) {
     const defaultColor = [255, 255, 255] as [number, number, number];
     engine.pigmentField[i] = {
@@ -111,12 +108,6 @@ export function initComplexArrays(
       isNew: false,
       pigmentData: { color: [...defaultColor], opacity: 1 },
       edgeIntensity: 0,
-    };
-
-    engine.brushColorField[i] = {
-      color: [...defaultColor],
-      opacity: 0,
-      isNew: false,
     };
 
     // 初始化lastBrushPigment数组元素

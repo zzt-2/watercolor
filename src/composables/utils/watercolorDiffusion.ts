@@ -482,8 +482,29 @@ export function updatePigmentField(engine: WatercolorEngine): void {
           };
         }
       } else {
+        // 内圈使用HSL保护机制，保持混色效果同时防止过度变深
+        const fieldColor = engine.pigmentField[index].isOld
+          ? engine.pigmentField[index].pigmentData.color
+          : engine.brush.color;
+        
+        // 转换到HSL色彩空间
+        const fieldHSL = RGB2HSL(fieldColor[0], fieldColor[1], fieldColor[2]);
+        const brushHSL = RGB2HSL(engine.brush.color[0], engine.brush.color[1], engine.brush.color[2]);
+        
+        // 保持色相和饱和度的混色效果，只保护亮度
+        const lightnessProtectionRatio = 0.1; // 30%保持原始亮度
+        const protectedL = fieldHSL.l * (1 - lightnessProtectionRatio) + brushHSL.l * lightnessProtectionRatio;
+        
+        // 确保亮度不会低于原始笔刷亮度的80%
+        const minAllowedL = brushHSL.l * 0.8;
+        const finalL = Math.max(minAllowedL, protectedL);
+        
+        // 转换回RGB
+        const { r, g, b } = HSL2RGB(fieldHSL.h, fieldHSL.s, finalL);
+        const protectedColor: [number, number, number] = [r, g, b];
+        
         engine.lastBrushPigment[brushIndex] = {
-          color: engine.pigmentField[index].pigmentData.color,
+          color: protectedColor,
           opacity: 1,
         };
       }
@@ -557,25 +578,38 @@ export function applyGaussianBlurToEdgeField(engine: WatercolorEngine): void {
 }
 
 /**
- * 将笔刷颜色混合到颜料场中
+ * 将三层边缘效果混合到颜料场中
  */
-export function mergeBrushColorToPigment(engine: WatercolorEngine): void {
-  // 直接遍历处理
-  for (let i = 0; i < engine.brushColorField.length; i++) {
-    const brushData = engine.brushColorField[i];
-    if (brushData.opacity <= 0.01) continue;
+export function mergeEdgesToPigment(engine: WatercolorEngine): void {
+  for (let i = 0; i < engine.canvasWidth * engine.canvasHeight; i++) {
+    if (!engine.pigmentField[i].isOld) continue;
 
-    // 混合到已有颜料
-    if (engine.pigmentField[i].isOld) {
-      const oldPigment = engine.pigmentField[i].pigmentData;
-      engine.pigmentField[i].pigmentData = {
-        color: mixbox.lerp(
-          `rgb(${oldPigment.color.join(",")})`,
-          `rgb(${brushData.color.join(",")})`,
-          brushData.opacity
-        ),
-        opacity: Math.min(1, oldPigment.opacity + brushData.opacity * 0.8),
-      };
+    // 计算综合边缘效果 - 与渲染权重保持一致
+    const totalEdgeEffect =
+      engine.firstLayerEdgeField[i] * 0.3 +
+      engine.secondLayerEdgeField[i] * 0.4 + // 降低笔刷局部权重
+      engine.thirdLayerEdgeField[i] * 0.5; // 增加拖动扩散权重
+
+    if (totalEdgeEffect > 0.01) {
+      const color = engine.pigmentField[i].pigmentData.color;
+      const { h, s, l } = RGB2HSL(color[0], color[1], color[2]);
+
+      // 根据原亮度计算降低幅度
+      const lightnessFactor = Math.pow(l, 0.5);
+      const lightnessReduction =
+        totalEdgeEffect * (0.25 - 0.15 * lightnessFactor) * 0.2; // 降低混合强度
+
+      // 限制最低亮度
+      const minL = 0.2;
+      const newL = Math.max(minL, l - lightnessReduction);
+
+      // 只调整亮度
+      const { r, g, b } = HSL2RGB(h, s, newL);
+      engine.pigmentField[i].pigmentData.color = [r, g, b];
     }
   }
+
+  // 混合完毕后只清空第二层（局部边缘），保留第一层和第三层
+  engine.secondLayerEdgeField.fill(0);
+  // 第一层保持不变，第三层的蒙版和效果继续保留
 }

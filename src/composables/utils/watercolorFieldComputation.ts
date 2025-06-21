@@ -40,7 +40,8 @@ export function setUniformPigmentDistribution(
 
   // 计算基于笔画计数的不透明度系数
   const opacityFactor =
-    0.5 + 0.5 * Math.min(1, engine.strokeCount / engine.maxStrokeCount);
+    // 0.5 + 0.5 * Math.min(1, engine.strokeCount / engine.maxStrokeCount);
+    0.5;
 
   // 确保lastBrushPigment数组尺寸足够
   const brushSize = (2 * radius + 1) * (2 * radius + 1);
@@ -82,18 +83,6 @@ export function setUniformPigmentDistribution(
       const dist = Math.sqrt(distSq);
       const normalizedDist = dist / radius;
       const newOpacity = (0.2 - normalizedDist * 0.18) * opacityFactor;
-
-      // 设置笔刷颜色场 - 条件简化
-      if (
-        !engine.brushColorField[index].isNew ||
-        newOpacity > engine.brushColorField[index].opacity
-      ) {
-        engine.brushColorField[index] = {
-          color: [...engine.brush.color],
-          opacity: newOpacity,
-          isNew: true,
-        };
-      }
 
       // 设置新颜料场
       engine.newPigmentField[index].isNew = true;

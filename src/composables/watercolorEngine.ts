@@ -9,8 +9,12 @@ import {
   initArrays,
   initP5,
 } from "./utils/watercolorInitialization";
-import { calculateWetAreaEdges, render } from "./utils/watercolorEdgeHandling";
-import { mergeBrushColorToPigment } from "./utils/watercolorDiffusion";
+import {
+  calculateWetAreaEdges,
+  render,
+  processThirdLayerDrag,
+} from "./utils/watercolorEdgeHandling";
+import { mergeEdgesToPigment } from "./utils/watercolorDiffusion";
 import { processNewPigmentAddition } from "./utils/watercolorProcessing";
 
 /**
@@ -49,15 +53,23 @@ class WatercolorEngine {
   public brushRadius: number = 0;
   public edgeIntensityField: Float32Array;
   public wetField: Float32Array;
-  public brushColorField: Array<{
-    color: [number, number, number];
-    opacity: number;
-    isNew: boolean;
-  }> = [];
+
   public strokeCount: number = 0;
   public maxStrokeCount: number = 50;
   public UpdateRadius = UpdateRadius;
   public edgeDetectionRadiusFactor = edgeDetectionRadiusFactor;
+
+  // 新增三层边缘效果相关字段
+  public firstLayerEdgeField: Float32Array; // 第一层，全画布持久边缘
+  public secondLayerEdgeField: Float32Array; // 第二层，笔刷局部边缘
+  public thirdLayerEdgeField: Float32Array; // 第三层，拖动扩散边缘
+  public edgeMask: Float32Array; // 拖动深色蒙版
+
+  // 新增拖拽轨迹记录
+  public brushMoveDirectionX: number = 0; // 笔刷移动方向X
+  public brushMoveDirectionY: number = 0; // 笔刷移动方向Y
+  public prevBrushCenterX: number = 0; // 上一次笔刷中心X
+  public prevBrushCenterY: number = 0; // 上一次笔刷中心Y
 
   constructor(canvasElement: HTMLCanvasElement, width: number, height: number) {
     this.canvasWidth = width;
@@ -78,6 +90,12 @@ class WatercolorEngine {
     this.edgeIntensityField = new Float32Array(size);
     this.wetField = new Float32Array(size);
     this.overlapMask = new Float32Array(size);
+
+    // 添加新的边缘场初始化
+    this.firstLayerEdgeField = new Float32Array(size);
+    this.secondLayerEdgeField = new Float32Array(size);
+    this.thirdLayerEdgeField = new Float32Array(size);
+    this.edgeMask = new Float32Array(size);
 
     const { left, right, top, bottom } = this.getRegion(
       this.brushCenterX,
@@ -238,12 +256,16 @@ class WatercolorEngine {
   public initArrays = () => initArrays(this);
   public calculateWetAreaEdges = () => calculateWetAreaEdges(this);
   public render = () => render(this);
-  public mergeBrushColorToPigment = () => mergeBrushColorToPigment(this);
+
   public processNewPigmentAddition = (
     centerX: number,
     centerY: number,
     radius: number
   ) => processNewPigmentAddition(this, centerX, centerY, radius);
+
+  // 添加新的方法暴露
+  public mergeEdgesToPigment = () => mergeEdgesToPigment(this);
+  public processThirdLayerDrag = () => processThirdLayerDrag(this);
 }
 
 export { WatercolorEngine };
