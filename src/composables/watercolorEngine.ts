@@ -12,7 +12,7 @@ import {
 import {
   calculateWetAreaEdges,
   render,
-  processThirdLayerDrag,
+  
 } from "./utils/watercolorEdgeHandling";
 import { mergeEdgesToPigment } from "./utils/watercolorDiffusion";
 import { processNewPigmentAddition } from "./utils/watercolorProcessing";
@@ -59,17 +59,21 @@ class WatercolorEngine {
   public UpdateRadius = UpdateRadius;
   public edgeDetectionRadiusFactor = edgeDetectionRadiusFactor;
 
-  // 新增三层边缘效果相关字段
+  // 新增边缘效果相关字段
   public firstLayerEdgeField: Float32Array; // 第一层，全画布持久边缘
   public secondLayerEdgeField: Float32Array; // 第二层，笔刷局部边缘
-  public thirdLayerEdgeField: Float32Array; // 第三层，拖动扩散边缘
-  public edgeMask: Float32Array; // 拖动深色蒙版
+  
+  // 第三层边缘扩散 - 两层内部结构
+  public thirdLayerTempField: Float32Array;      // 临时计算层 (1.5倍半径的小数组)
+  public thirdLayerPersistentField: Float32Array; // 持久存储层 (全画布)
+  public thirdLayerTempSize: number = 0;         // 临时层的尺寸
+  public thirdLayerTempCenterX: number = 0;      // 临时层中心X
+  public thirdLayerTempCenterY: number = 0;      // 临时层中心Y
 
-  // 新增拖拽轨迹记录
-  public brushMoveDirectionX: number = 0; // 笔刷移动方向X
-  public brushMoveDirectionY: number = 0; // 笔刷移动方向Y
-  public prevBrushCenterX: number = 0; // 上一次笔刷中心X
-  public prevBrushCenterY: number = 0; // 上一次笔刷中心Y
+  // 拖动方向追踪
+  public dragDirectionX: number = 0;
+  public dragDirectionY: number = 0;
+  public hasDragDirection: boolean = false;
 
   constructor(canvasElement: HTMLCanvasElement, width: number, height: number) {
     this.canvasWidth = width;
@@ -94,8 +98,11 @@ class WatercolorEngine {
     // 添加新的边缘场初始化
     this.firstLayerEdgeField = new Float32Array(size);
     this.secondLayerEdgeField = new Float32Array(size);
-    this.thirdLayerEdgeField = new Float32Array(size);
-    this.edgeMask = new Float32Array(size);
+    
+    // 初始化第三层边缘扩散字段
+    this.thirdLayerPersistentField = new Float32Array(size);
+    // thirdLayerTempField初始化为空数组，将在第一次使用时动态创建
+    this.thirdLayerTempField = new Float32Array(0);
 
     const { left, right, top, bottom } = this.getRegion(
       this.brushCenterX,
@@ -199,12 +206,9 @@ class WatercolorEngine {
    */
   public setBrushSize(size: number): void {
     this.brush.size = size;
-    const { left, right, top, bottom } = this.getRegion(
-      this.brushCenterX,
-      this.brushCenterY,
-      this.brush.size
-    );
-    this.lastBrushPigment = Array((right - left + 1) * (bottom - top + 1))
+    // 与lastBrushPigment使用相同的大小计算公式
+    const brushSize = (this.brush.size * 2 + 1) * (this.brush.size * 2 + 1);
+    this.lastBrushPigment = Array(brushSize)
       .fill(null)
       .map(() => ({
         color: [...this.brush.color],
@@ -246,6 +250,52 @@ class WatercolorEngine {
   }
 
   /**
+   * 更新拖动方向
+   */
+  public updateDragDirection(currentX: number, currentY: number): void {
+    if (this.isDrawing && this.prevMouseX !== undefined && this.prevMouseY !== undefined) {
+      const dx = currentX - this.prevMouseX;
+      const dy = currentY - this.prevMouseY;
+      const magnitude = Math.sqrt(dx * dx + dy * dy);
+      
+      if (magnitude > 0) {
+        this.dragDirectionX = dx / magnitude;
+        this.dragDirectionY = dy / magnitude;
+        this.hasDragDirection = true;
+      }
+    }
+  }
+
+  /**
+   * 重置拖动方向
+   */
+  public resetDragDirection(): void {
+    this.dragDirectionX = 0;
+    this.dragDirectionY = 0;
+    this.hasDragDirection = false;
+    // 清空第三层临时场，为下次拖动做准备
+    this.thirdLayerTempField.fill(0);
+  }
+
+  /**
+   * 确保第三层临时场的大小正确
+   */
+  public   ensureThirdLayerTempSize(centerX: number, centerY: number, radius: number): void {
+    const tempRadius = Math.ceil(radius);
+    const tempSize = (tempRadius * 2 + 1) * (tempRadius * 2 + 1);
+    
+    // 只在尺寸变化时重新创建数组
+    if (this.thirdLayerTempSize !== tempSize) {
+      this.thirdLayerTempField = new Float32Array(tempSize);
+      this.thirdLayerTempSize = tempSize;
+    }
+    
+    // 更新中心位置
+    this.thirdLayerTempCenterX = centerX;
+    this.thirdLayerTempCenterY = centerY;
+  }
+
+  /**
    * 增加笔画计数
    */
   public incrementStrokeCount(): void {
@@ -265,7 +315,6 @@ class WatercolorEngine {
 
   // 添加新的方法暴露
   public mergeEdgesToPigment = () => mergeEdgesToPigment(this);
-  public processThirdLayerDrag = () => processThirdLayerDrag(this);
 }
 
 export { WatercolorEngine };

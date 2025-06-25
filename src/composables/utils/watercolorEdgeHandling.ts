@@ -15,46 +15,349 @@ function calculateAccumulationResistance(
 }
 
 /**
- * 计算到最近颜料边缘的距离
+ * 触发点接口定义
  */
-function calculateDistanceToNearestPigmentEdge(
-  x: number,
-  y: number,
-  engine: WatercolorEngine
-): number {
-  const searchRadius = engine.brushRadius * 2;
-  let minDistance = Infinity;
+interface TriggerPoint {
+  x: number;
+  y: number;
+  intensity: number;
+}
 
-  for (let dy = -searchRadius; dy <= searchRadius; dy++) {
-    for (let dx = -searchRadius; dx <= searchRadius; dx++) {
-      // 只在圆形范围内搜索，避免方形区域影响
-      const searchDist = Math.sqrt(dx * dx + dy * dy);
-      if (searchDist > searchRadius) continue;
+/**
+ * 检测边缘扩散触发点
+ */
+function detectEdgeDiffusionTriggers(engine: WatercolorEngine): TriggerPoint[] {
+  const triggers: TriggerPoint[] = [];
+  const { left, right, top, bottom } = engine.getRegion(
+    engine.brushCenterX,
+    engine.brushCenterY,
+    engine.brushRadius + 1
+  );
 
-      const checkX = x + dx;
-      const checkY = y + dy;
-
-      if (
-        checkX >= 0 &&
-        checkX < engine.canvasWidth &&
-        checkY >= 0 &&
-        checkY < engine.canvasHeight
-      ) {
-        const index = checkY * engine.canvasWidth + checkX;
-
-        // 如果这个点有颜料，检查是否是边缘
-        if (
-          engine.pigmentField[index].isOld ||
-          engine.newPigmentField[index].isNew
-        ) {
-          minDistance = Math.min(minDistance, searchDist);
+  // 在整个笔刷范围内检测，不限制边缘
+  for (let y = top; y <= bottom; y++) {
+    for (let x = left; x <= right; x++) {
+      const dx = x - engine.brushCenterX;
+      const dy = y - engine.brushCenterY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      // 在整个笔刷范围内都可以触发扩散
+      if (distance <= engine.brushRadius) {
+        const index = y * engine.canvasWidth + x;
+        
+        // 检查是否同时存在颜料边缘
+        const hasEdge = engine.firstLayerEdgeField[index] > 0.02 || 
+                       engine.secondLayerEdgeField[index] > 0.02;
+        const hasPigment = engine.pigmentField[index].isOld || 
+                          engine.newPigmentField[index].isNew;
+        
+        if (hasEdge && hasPigment) {
+          const intensity = Math.max(
+            engine.firstLayerEdgeField[index],
+            engine.secondLayerEdgeField[index]
+          );
+          triggers.push({ x, y, intensity });
         }
       }
     }
   }
-
-  return minDistance === Infinity ? searchRadius : minDistance;
+  
+  return triggers;
 }
+
+/**
+ * 将全局坐标转换为临时层的局部坐标 - 与lastBrushPigment保持一致
+ */
+function globalToTempCoords(globalX: number, globalY: number, engine: WatercolorEngine): {tempX: number, tempY: number, tempIndex: number} {
+  const tempRadius = Math.ceil(engine.brushRadius);
+  // 与lastBrushPigment相同的转换方式
+  const tempLeft = engine.thirdLayerTempCenterX - tempRadius;
+  const tempTop = engine.thirdLayerTempCenterY - tempRadius;
+  const tempX = globalX - tempLeft;
+  const tempY = globalY - tempTop;
+  const tempSize = tempRadius * 2 + 1; // 与lastBrushPigment一致，使用2*radius+1
+  const tempIndex = tempY * tempSize + tempX;
+  
+  return { tempX, tempY, tempIndex };
+}
+
+/**
+ * 检查坐标是否在临时层范围内
+ */
+function isInTempBounds(tempX: number, tempY: number, engine: WatercolorEngine): boolean {
+  const tempRadius = Math.ceil(engine.brushRadius);
+  const tempSize = tempRadius * 2 + 1;
+  return tempX >= 0 && tempX < tempSize && tempY >= 0 && tempY < tempSize;
+}
+
+/**
+ * 在触发点简单注入强度值
+ */
+function injectTriggerIntensity(
+  engine: WatercolorEngine,
+  centerX: number,
+  centerY: number,
+  baseIntensity: number
+): void {
+  // 转换到临时层坐标
+  const { tempX, tempY, tempIndex } = globalToTempCoords(centerX, centerY, engine);
+  
+  if (!isInTempBounds(tempX, tempY, engine)) {
+    return;
+  }
+  
+  // 简单注入强度，适度降低避免过饱和
+  const injectionStrength = baseIntensity * 0.15; // 降低注入强度
+  
+  // 累积到临时层，限制最大值
+  const currentValue = engine.thirdLayerTempField[tempIndex];
+  const maxAccumulation = 0.6; // 降低最大累积值
+  engine.thirdLayerTempField[tempIndex] = Math.min(maxAccumulation, currentValue + injectionStrength);
+}
+
+/**
+ * 应用动态平衡衰减到临时层
+ */
+function applyDynamicDecay(engine: WatercolorEngine): void {
+  const tempRadius = Math.ceil(engine.brushRadius);
+  const tempSize = tempRadius * 2 + 1;
+  const centerX = tempRadius; // 在tempSize数组中的中心X坐标
+  const centerY = tempRadius; // 在tempSize数组中的中心Y坐标
+  
+  for (let tempY = 0; tempY < tempSize; tempY++) {
+    for (let tempX = 0; tempX < tempSize; tempX++) {
+      const tempIndex = tempY * tempSize + tempX;
+      
+      if (engine.thirdLayerTempField[tempIndex] > 0.0001) {
+        // 计算距离中心的距离
+        const dx = tempX - centerX;
+        const dy = tempY - centerY;
+        const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+        
+        // 只在圆形范围内应用衰减
+        if (distanceFromCenter <= tempRadius) {
+          const normalizedDistance = distanceFromCenter / tempRadius;
+        
+          // 更平缓的衰减 - 减少各级差距，提高持久性
+          let decayFactor: number;
+          if (normalizedDistance > 0.8) {
+            // 外圈：较温和的衰减
+            decayFactor = 0.99;
+          } else if (normalizedDistance > 0.6) {
+            // 中外圈：轻微衰减
+            decayFactor = 0.992;
+          } else {
+            // 内圈：几乎不衰减
+            decayFactor = 0.997;
+          }
+          engine.thirdLayerTempField[tempIndex] *= decayFactor;
+          
+          // 降低清除阈值，让更多微弱效果保留
+          if (engine.thirdLayerTempField[tempIndex] < 0.00005) {
+            engine.thirdLayerTempField[tempIndex] = 0;
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 从持久层复制初始值到临时层（类似lastBrushPigment机制）
+ */
+function copyPersistentToTemp(engine: WatercolorEngine): void {
+  const tempRadius = Math.ceil(engine.brushRadius);
+  const tempSize = tempRadius * 2 + 1;
+  const tempLeft = engine.thirdLayerTempCenterX - tempRadius;
+  const tempTop = engine.thirdLayerTempCenterY - tempRadius;
+  
+  // 遍历临时层，从持久层复制对应值
+  for (let tempY = 0; tempY < tempSize; tempY++) {
+    for (let tempX = 0; tempX < tempSize; tempX++) {
+      const tempIndex = tempY * tempSize + tempX;
+      
+      // 转换到全局坐标
+      const globalX = tempLeft + tempX;
+      const globalY = tempTop + tempY;
+      
+      // 检查边界
+      if (globalX >= 0 && globalX < engine.canvasWidth && 
+          globalY >= 0 && globalY < engine.canvasHeight) {
+        const globalIndex = globalY * engine.canvasWidth + globalX;
+        
+        // 从持久层复制值到临时层
+        engine.thirdLayerTempField[tempIndex] = engine.thirdLayerPersistentField[globalIndex];
+      } else {
+        // 边界外设为0
+        engine.thirdLayerTempField[tempIndex] = 0;
+      }
+    }
+  }
+}
+
+/**
+ * 对临时层中所有非零值进行高效的邻域扩散
+ */
+function applyFieldDiffusion(engine: WatercolorEngine): void {
+  const tempRadius = Math.ceil(engine.brushRadius);
+  const tempSize = tempRadius * 2 + 1;
+  
+  // 创建临时缓冲区以避免自我影响
+  const diffusionBuffer = new Float32Array(engine.thirdLayerTempField.length);
+  
+  // 预计算方向权重（性能优化）
+  const hasDirection = engine.hasDragDirection;
+  const dragDirX = hasDirection ? engine.dragDirectionX : 0;
+  const dragDirY = hasDirection ? engine.dragDirectionY : 0;
+  
+  // 8邻域偏移（优化：预定义避免重复计算）
+  const neighbors = [
+    [-1, -1], [-1, 0], [-1, 1],
+    [0, -1],           [0, 1], 
+    [1, -1],  [1, 0],  [1, 1]
+  ];
+  
+  // 遍历所有临时层点
+  for (let tempY = 0; tempY < tempSize; tempY++) {
+    for (let tempX = 0; tempX < tempSize; tempX++) {
+      const tempIndex = tempY * tempSize + tempX;
+      const currentValue = engine.thirdLayerTempField[tempIndex];
+      
+      // 性能优化：早期退出，只处理有意义的值
+      if (currentValue < 0.001) continue;
+      
+      // 计算到中心的距离（用于范围检查）
+      const dx = tempX - tempRadius;
+      const dy = tempY - tempRadius;
+      const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+      
+      // 只在圆形范围内扩散
+      if (distanceFromCenter > tempRadius) continue;
+      
+      // 计算扩散强度（大幅降低以避免快速饱和）
+      const diffusionStrength = currentValue * 0.02; // 从0.12大幅降低到0.025
+      
+      // 向8邻域扩散
+      for (const [offsetX, offsetY] of neighbors) {
+        const neighborX = tempX + offsetX;
+        const neighborY = tempY + offsetY;
+        
+        // 边界检查
+        if (neighborX < 0 || neighborX >= tempSize || 
+            neighborY < 0 || neighborY >= tempSize) continue;
+        
+        // 检查邻域点是否在圆形范围内
+        const neighborDx = neighborX - tempRadius;
+        const neighborDy = neighborY - tempRadius;
+        const neighborDist = Math.sqrt(neighborDx * neighborDx + neighborDy * neighborDy);
+        if (neighborDist > tempRadius) continue;
+        
+        const neighborIndex = neighborY * tempSize + neighborX;
+        
+        // 计算方向性权重
+        let directionalWeight = 1.0;
+        if (hasDirection) {
+          // 计算扩散方向（相对于8邻域的偏移）
+          const diffusionDirX = offsetX;
+          const diffusionDirY = offsetY;
+          
+          // 计算与拖动方向的点积（不需要归一化，因为偏移量本身就是单位向量的倍数）
+          const dotProduct = diffusionDirX * dragDirX + diffusionDirY * dragDirY;
+          
+          // 更强的方向性差异：严格限制非拖动方向的扩散
+          if (dotProduct > 0.5) {
+            // 拖动方向：正常扩散
+            directionalWeight = 1.0;
+          } else if (dotProduct < -0.5) {
+            // 反方向：大幅减弱
+            directionalWeight = 0.1;
+          } else {
+            // 侧向：显著减弱
+            directionalWeight = 0.3;
+          }
+        } else {
+          // 没有拖动方向时，减少整体扩散强度
+          directionalWeight = 0.6;
+        }
+        
+        // 距离衰减（对角邻居距离更远）
+        const distanceWeight = (Math.abs(offsetX) + Math.abs(offsetY)) === 1 ? 1.0 : 0.7;
+        
+        // 累积扩散值到缓冲区
+        const finalDiffusion = diffusionStrength * directionalWeight * distanceWeight;
+        diffusionBuffer[neighborIndex] += finalDiffusion;
+      }
+    }
+  }
+  
+  // 将扩散结果累加回原始数组，限制最大值避免过饱和
+  for (let i = 0; i < diffusionBuffer.length; i++) {
+    if (diffusionBuffer[i] > 0) {
+      engine.thirdLayerTempField[i] = Math.min(0.5, engine.thirdLayerTempField[i] + diffusionBuffer[i]); // 从1.0降到0.5
+    }
+  }
+}
+
+/**
+ * 处理第三层边缘扩散
+ */
+function processThirdLayerEdgeDiffusion(engine: WatercolorEngine, triggers: TriggerPoint[]): void {
+  // 确保临时层大小正确
+  engine.ensureThirdLayerTempSize(engine.brushCenterX, engine.brushCenterY, engine.brushRadius);
+  
+  // 从持久层复制初始值到临时层（类似lastBrushPigment的机制）
+  copyPersistentToTemp(engine);
+  
+  // 应用动态平衡衰减
+  applyDynamicDecay(engine);
+  
+  // 对每个触发点应用强度注入（而非扩散）
+  for (const trigger of triggers) {
+    injectTriggerIntensity(engine, trigger.x, trigger.y, trigger.intensity);
+  }
+  
+  // 【新增】对临时层中所有非零值进行扩散
+  applyFieldDiffusion(engine);
+  
+  // 将临时层数据转移到持久层（严格使用圆形范围）
+  const tempRadius = Math.ceil(engine.brushRadius);
+  const tempSize = tempRadius * 2 + 1;
+  const tempLeft = engine.thirdLayerTempCenterX - tempRadius;
+  const tempTop = engine.thirdLayerTempCenterY - tempRadius;
+  
+  for (let tempY = 0; tempY < tempSize; tempY++) {
+    for (let tempX = 0; tempX < tempSize; tempX++) {
+      const tempIndex = tempY * tempSize + tempX;
+      const tempValue = engine.thirdLayerTempField[tempIndex] / 2;
+      
+      if (tempValue > 0.0001) { // 降低阈值，让更多数据转移到持久层
+        // 计算在temp数组中距离中心的距离
+        const dx = tempX - tempRadius;
+        const dy = tempY - tempRadius;
+        const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+        
+        // 只在圆形范围内转移到持久层
+        if (distanceFromCenter <= tempRadius) {
+          // 转换回全局坐标
+          const globalX = tempLeft + tempX;
+          const globalY = tempTop + tempY;
+          
+          // 检查边界
+          if (globalX >= 0 && globalX < engine.canvasWidth && 
+              globalY >= 0 && globalY < engine.canvasHeight) {
+            const globalIndex = globalY * engine.canvasWidth + globalX;
+            
+            // 新旧混合更新到持久层（类似lastBrushPigment的机制）
+            const oldValue = engine.thirdLayerPersistentField[globalIndex];
+            const mixRatio = 0.7; // 新值权重
+            engine.thirdLayerPersistentField[globalIndex] = oldValue * (1 - mixRatio) + tempValue * mixRatio;
+          }
+        }
+      }
+    }
+  }
+}
+
 
 /**
  * 使用Sobel算子计算湿区的边缘强度 - 三层边缘实现
@@ -75,18 +378,7 @@ export function calculateWetAreaEdges(engine: WatercolorEngine): void {
   const validTop = top + 1;
   const validBottom = bottom - 1;
 
-  // 更新笔刷移动方向
-  if (engine.isDrawing) {
-    const dx = engine.brushCenterX - engine.prevBrushCenterX;
-    const dy = engine.brushCenterY - engine.prevBrushCenterY;
-    const moveDistance = Math.sqrt(dx * dx + dy * dy);
-
-    if (moveDistance > 1) {
-      // 只有移动距离足够大时才更新方向
-      engine.brushMoveDirectionX = dx / moveDistance;
-      engine.brushMoveDirectionY = dy / moveDistance;
-    }
-  }
+  // 笔刷移动方向记录已删除，为重写第三层做准备
 
   // 创建临时湿度梯度场
   const gradientMagnitude = new Float32Array(
@@ -183,15 +475,13 @@ export function calculateWetAreaEdges(engine: WatercolorEngine): void {
         // 更强的清除效果
         const clearStrength = Math.max(0, 1 - dist / brushCoverRadius);
         engine.firstLayerEdgeField[index] *= 1 - clearStrength * 0.9; // 增强清除第一层
-        engine.thirdLayerEdgeField[index] *= 1 - clearStrength * 0.8; // 增强清除第三层
-        // 同时清除蒙版，避免旧的深色累积
-        engine.edgeMask[index] *= 1 - clearStrength * 0.6;
+        // 第三层清除已删除，准备重写
       }
     }
   }
 
-  // 第二层：清空笔刷1.2倍半径范围，在1倍半径内重新计算
-  const clearRadius = engine.brushRadius * 1.2;
+      // 第二层：清空笔刷1倍半径范围，在1倍半径内重新计算
+    const clearRadius = engine.brushRadius;
   const assignRadius = engine.brushRadius * 1.0;
   const {
     left: clearLeft,
@@ -308,12 +598,13 @@ export function calculateWetAreaEdges(engine: WatercolorEngine): void {
     }
   }
 
-  // 处理第三层拖动效果
-  processThirdLayerDrag(engine);
-
-  // 更新前一次位置
-  engine.prevBrushCenterX = engine.brushCenterX;
-  engine.prevBrushCenterY = engine.brushCenterY;
+  // 处理第三层边缘扩散
+  if (engine.hasDragDirection) {
+    const triggers = detectEdgeDiffusionTriggers(engine);
+    // if (triggers.length > 0) {
+      processThirdLayerEdgeDiffusion(engine, triggers);
+    // }
+  }
 }
 
 /**
@@ -471,11 +762,11 @@ export function render(engine: WatercolorEngine): void {
       // 获取基础颜色
       const finalColor = engine.pigmentField[index].pigmentData.color;
 
-      // 计算综合边缘效果 - 调整权重配合产生ArtRage黑边效果
+      // 计算综合边缘效果 - 三层权重配合产生边缘效果
       const combinedEdgeEffect =
-        engine.firstLayerEdgeField[index] * 0.3 + // 全画布持久边缘
-        engine.secondLayerEdgeField[index] * 0.4 + // 降低笔刷局部权重
-        engine.thirdLayerEdgeField[index] * 0.5; // 增加拖动扩散权重
+        engine.firstLayerEdgeField[index] * 0.25 + // 全画布持久边缘
+        engine.secondLayerEdgeField[index] * 0.45 + // 笔刷局部边缘
+        engine.thirdLayerPersistentField[index] * 0.30; // 拖动扩散边缘
 
       // 处理边缘效果 - 保持现有的 HSL 处理方式
       if (combinedEdgeEffect > 0.01) {
@@ -488,8 +779,8 @@ export function render(engine: WatercolorEngine): void {
         // 根据原亮度计算降低幅度
         const lightnessFactor = Math.pow(l, 0.5);
         const lightnessReduction =
-          combinedEdgeEffect * (0.35 - 0.25 * lightnessFactor);
-        const newL = Math.max(0.15, l - lightnessReduction);
+          combinedEdgeEffect * (0.45 - 0.25 * lightnessFactor); // 增强边缘效果
+        const newL = Math.max(0.05, l - lightnessReduction); // 降低最小亮度限制
 
         // 只调整亮度
         const { r, g, b } = HSL2RGB(h, s, newL);
@@ -507,203 +798,4 @@ export function render(engine: WatercolorEngine): void {
   engine.p5Instance.updatePixels();
 }
 
-/**
- * 处理第三层蒙版拖动效果 - 从第二层继承并实现渐进扩散
- */
-export function processThirdLayerDrag(engine: WatercolorEngine): void {
-  const brushRadius = engine.brushRadius;
-  const { left, right, top, bottom } = engine.getRegion(
-    engine.brushCenterX,
-    engine.brushCenterY,
-    brushRadius * 3
-  );
 
-  // 第一步：从第二层继承强边缘到蒙版
-  for (let y = top; y <= bottom; y++) {
-    for (let x = left; x <= right; x++) {
-      const index = y * engine.canvasWidth + x;
-
-      // 从第二层的强边缘继承到蒙版
-      if (engine.secondLayerEdgeField[index] > 0.25) {
-        const dx = x - engine.brushCenterX;
-        const dy = y - engine.brushCenterY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist <= brushRadius * 1.5) {
-          // 将第二层的强边缘转移到蒙版
-          const inheritStrength = engine.secondLayerEdgeField[index] * 0.8;
-          engine.edgeMask[index] = Math.min(
-            0.9,
-            Math.max(engine.edgeMask[index], inheritStrength)
-          );
-        }
-      }
-    }
-  }
-
-  // 第二步：渐进扩散机制 - 让深色持续向外流动
-  const tempMask = new Float32Array(engine.edgeMask.length);
-  tempMask.set(engine.edgeMask);
-
-  // 多轮小距离扩散，模拟流动效果
-  const diffusionRounds = 3; // 多轮小扩散
-  const roundStrength = 0.38; // 每轮扩散强度
-
-  for (let round = 0; round < diffusionRounds; round++) {
-    const roundMask = new Float32Array(tempMask.length);
-    roundMask.set(tempMask);
-
-    for (let y = top; y <= bottom; y++) {
-      for (let x = left; x <= right; x++) {
-        const index = y * engine.canvasWidth + x;
-
-        // 圆形约束检查
-        const dx = x - engine.brushCenterX;
-        const dy = y - engine.brushCenterY;
-        const distToCenter = Math.sqrt(dx * dx + dy * dy);
-        
-        // 只在圆形范围内处理，超出范围跳过
-        if (distToCenter > brushRadius * 1.2) continue;
-
-        if (tempMask[index] > 0.08) {
-          const currentDarkness = tempMask[index];
-
-          // 计算扩散方向：基础4方向 + 方向性强度控制
-          const baseDirections = [
-            [-1, 0], // 左
-            [1, 0], // 右
-            [0, -1], // 上
-            [0, 1], // 下
-          ];
-
-          let totalDiffused = 0;
-
-          for (const [dx, dy] of baseDirections) {
-            const targetX = x + dx;
-            const targetY = y + dy;
-
-            if (
-              targetX >= 0 &&
-              targetX < engine.canvasWidth &&
-              targetY >= 0 &&
-              targetY < engine.canvasHeight
-            ) {
-              // 检查目标位置是否也在圆形范围内
-              const targetDx = targetX - engine.brushCenterX;
-              const targetDy = targetY - engine.brushCenterY;
-              const targetDistToCenter = Math.sqrt(targetDx * targetDx + targetDy * targetDy);
-              
-              // 目标位置也必须在圆形范围内
-              if (targetDistToCenter > brushRadius * 1.2) continue;
-              
-              const targetIndex = targetY * engine.canvasWidth + targetX;
-
-              // 计算当前扩散方向与笔刷移动方向的相符程度
-              const brushMoveLength = Math.sqrt(
-                engine.brushMoveDirectionX * engine.brushMoveDirectionX +
-                  engine.brushMoveDirectionY * engine.brushMoveDirectionY
-              );
-
-              let directionAlignment = 1.0; // 默认无方向性影响
-
-              if (brushMoveLength > 0.1) {
-                // 只有在有明显移动时才应用方向性
-                // 计算点积来判断方向相符程度
-                const dotProduct =
-                  (dx * engine.brushMoveDirectionX +
-                    dy * engine.brushMoveDirectionY) /
-                  brushMoveLength;
-
-                // 将点积范围从[-1,1]映射到[0.1,1.0]
-                // 完全相符（点积=1）: directionAlignment = 1.0
-                // 完全相反（点积=-1）: directionAlignment = 0.1
-                directionAlignment =
-                  0.1 + 0.9 * Math.max(0, (dotProduct + 1) / 2);
-              }
-
-              // 计算到颜料边缘的距离，距离边缘越远扩散越弱
-              const distanceToEdge = calculateDistanceToNearestPigmentEdge(
-                targetX,
-                targetY,
-                engine
-              );
-              const edgeDistanceFactor = Math.max(
-                0.05,
-                1.0 - distanceToEdge / (brushRadius * 3)
-              );
-
-              // 应用方向性强度控制
-              const diffusedAmount =
-                currentDarkness *
-                roundStrength *
-                edgeDistanceFactor *
-                directionAlignment *
-                0.9;
-
-              roundMask[targetIndex] = Math.min(
-                1.0,
-                roundMask[targetIndex] + diffusedAmount
-              );
-              totalDiffused += diffusedAmount;
-            }
-          }
-
-          // 源头轻微减少，但保持大部分
-          roundMask[index] = Math.max(
-            0,
-            currentDarkness - totalDiffused * 0.15
-          );
-        }
-      }
-    }
-
-    tempMask.set(roundMask);
-  }
-
-  // 第三步：全局衰减
-  for (let i = 0; i < tempMask.length; i++) {
-    if (tempMask[i] > 0.05) {
-      tempMask[i] *= 0.994; // 非常缓慢的衰减
-    } else if (tempMask[i] > 0.01) {
-      tempMask[i] *= 0.98;
-    }
-  }
-
-  // 更新蒙版
-  engine.edgeMask.set(tempMask);
-
-  // 第四步：基于蒙版生成第三层效果
-  for (let y = top; y <= bottom; y++) {
-    for (let x = left; x <= right; x++) {
-      const index = y * engine.canvasWidth + x;
-
-      if (engine.edgeMask[index] > 0.02) {
-        // 距离越远效果越强
-        const dx = x - engine.brushCenterX;
-        const dy = y - engine.brushCenterY;
-        const distToBrush = Math.sqrt(dx * dx + dy * dy);
-
-        const distanceFactor = Math.min(1.2, distToBrush / (brushRadius * 0.8));
-        const thirdLayerIntensity =
-          engine.edgeMask[index] * distanceFactor * 0.5;
-
-        // 应用累积阻力机制到第三层
-        const maxThirdLayer = 1.0;
-        const thirdResistance = calculateAccumulationResistance(
-          engine.thirdLayerEdgeField[index],
-          maxThirdLayer
-        );
-        const newThirdIntensity =
-          engine.thirdLayerEdgeField[index] +
-          thirdLayerIntensity * thirdResistance;
-
-        engine.thirdLayerEdgeField[index] = Math.min(
-          maxThirdLayer,
-          Math.max(engine.thirdLayerEdgeField[index] * 0.99, newThirdIntensity)
-        );
-      } else {
-        engine.thirdLayerEdgeField[index] *= 0.98;
-      }
-    }
-  }
-}

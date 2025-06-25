@@ -586,9 +586,9 @@ export function mergeEdgesToPigment(engine: WatercolorEngine): void {
 
     // 计算综合边缘效果 - 与渲染权重保持一致
     const totalEdgeEffect =
-      engine.firstLayerEdgeField[i] * 0.3 +
-      engine.secondLayerEdgeField[i] * 0.4 + // 降低笔刷局部权重
-      engine.thirdLayerEdgeField[i] * 0.5; // 增加拖动扩散权重
+      engine.firstLayerEdgeField[i] * 0.25 +
+      engine.secondLayerEdgeField[i] * 0.75 +
+      engine.thirdLayerPersistentField[i] * 0.50;
 
     if (totalEdgeEffect > 0.01) {
       const color = engine.pigmentField[i].pigmentData.color;
@@ -609,7 +609,8 @@ export function mergeEdgesToPigment(engine: WatercolorEngine): void {
     }
   }
 
-  // 混合完毕后只清空第二层（局部边缘），保留第一层和第三层
+  // 混合完毕后只清空第二层（局部边缘），保留第一层
   engine.secondLayerEdgeField.fill(0);
-  // 第一层保持不变，第三层的蒙版和效果继续保留
+  // 第一层保持不变，第三层的持久扩散效果也继续保留
+  // 第三层的扩散效果会在下次绘制时逐渐消失或被新的扩散覆盖
 }
