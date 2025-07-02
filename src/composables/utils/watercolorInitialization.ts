@@ -25,6 +25,10 @@ export function initP5(engine: WatercolorEngine): void {
         // 确保使用整数坐标
         const mouseX = Math.round(p.mouseX);
         const mouseY = Math.round(p.mouseY);
+        
+        // 在开始新笔触前清空对应区域的第三层持久层
+        engine.clearThirdLayerAtPosition(mouseX, mouseY, engine.brush.size);
+        
         engine.processNewPigmentAddition(mouseX, mouseY, engine.brush.size);
         engine.render();
         engine.isDrawing = true;
@@ -53,10 +57,8 @@ export function initP5(engine: WatercolorEngine): void {
 
     p.mouseReleased = () => {
       engine.isDrawing = false;
-      if (engine.strokeCount > 0) {
-        engine.mergeEdgesToPigment(); // 混合所有三层边缘
-      }
       engine.strokeCount = 0;
+      engine.thirdLayerTempField.fill(0);
       // 重置拖动方向
       engine.resetDragDirection();
     };
@@ -84,7 +86,6 @@ export function initArrays(engine: WatercolorEngine): void {
     }));
 
   engine.pigmentCenters = [];
-  engine.edgeIntensityField.fill(0);
   engine.wetField.fill(0);
 
   // 初始化新的边缘场

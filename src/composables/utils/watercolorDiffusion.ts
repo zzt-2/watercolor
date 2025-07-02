@@ -176,7 +176,7 @@ export function applyDirectionalDiffusion(
   }
 
   // 将临时缓冲区数据复制回原始数组，增加范围以包含所有扩散点
-  const expandedRange = 30; // 扩散扩展范围
+  const expandedRange = engine.brushRadius * 1.5; // 扩散扩展范围
   for (let y = top - expandedRange; y <= bottom + expandedRange; y++) {
     for (let x = left - expandedRange; x <= right + expandedRange; x++) {
       if (
@@ -187,115 +187,16 @@ export function applyDirectionalDiffusion(
       ) {
         const index = y * engine.canvasWidth + x;
         if (tempBuffer[index] && tempBuffer[index].isNew) {
-          engine.newPigmentField[index] = { ...tempBuffer[index] };
+          engine.newPigmentField[index] = {
+            isNew: true,
+            pigmentData: {
+              color: [...tempBuffer[index].pigmentData.color],
+              opacity: tempBuffer[index].pigmentData.opacity,
+            },
+            edgeIntensity: 0,
+          };
         }
       }
-    }
-  }
-}
-
-/**
- * 对颜料场应用3x3均匀卷积，使扩散更自然
- */
-export function applyConvolution(engine: WatercolorEngine): void {
-  const { left, right, top, bottom } = engine.getRegion(
-    engine.brushCenterX,
-    engine.brushCenterY,
-    engine.brushRadius * 1.5
-  );
-
-  // 创建临时缓冲区
-  const tempBuffer = Array(engine.canvasWidth * engine.canvasHeight)
-    .fill(null)
-    .map(() => ({
-      isNew: false,
-      pigmentData: {
-        color: [255, 255, 255] as [number, number, number],
-        opacity: 1,
-      },
-      edgeIntensity: 0,
-    }));
-
-  // 应用卷积
-  for (let y = top; y < bottom; y++) {
-    for (let x = left; x < right; x++) {
-      const index = y * engine.canvasWidth + x;
-      if (!engine.newPigmentField[index].isNew) continue;
-
-      // 应用3x3卷积
-      let sumColor = [0, 0, 0],
-        sumOpacity = 0,
-        sumEdgeIntensity = 0;
-      let count = 0,
-        maxEdgeIntensity = 0;
-
-      // 遍历3x3邻域
-      for (let ky = -1; ky <= 1; ky++) {
-        for (let kx = -1; kx <= 1; kx++) {
-          const nx = x + kx,
-            ny = y + ky;
-          if (
-            nx >= 0 &&
-            nx < engine.canvasWidth &&
-            ny >= 0 &&
-            ny < engine.canvasHeight
-          ) {
-            const nIndex = ny * engine.canvasWidth + nx;
-            if (engine.newPigmentField[nIndex].isNew) {
-              const color = engine.newPigmentField[nIndex].pigmentData.color;
-              const opacity =
-                engine.newPigmentField[nIndex].pigmentData.opacity;
-              const edgeIntensity =
-                engine.newPigmentField[nIndex].edgeIntensity;
-
-              // 中心点权重更高
-              const weight = kx === 0 && ky === 0 ? 2.0 : 1.0;
-
-              sumColor[0] += color[0] * weight;
-              sumColor[1] += color[1] * weight;
-              sumColor[2] += color[2] * weight;
-              sumOpacity += opacity * weight;
-              sumEdgeIntensity += edgeIntensity * weight;
-              count += weight;
-
-              maxEdgeIntensity = Math.max(maxEdgeIntensity, edgeIntensity);
-            }
-          }
-        }
-      }
-
-      // 只有当有颜料点时才更新
-      if (count > 0) {
-        tempBuffer[index] = {
-          isNew: true,
-          pigmentData: {
-            color: [
-              Math.round(sumColor[0] / count),
-              Math.round(sumColor[1] / count),
-              Math.round(sumColor[2] / count),
-            ] as [number, number, number],
-            opacity: Math.min(1, sumOpacity / count),
-          },
-          edgeIntensity:
-            maxEdgeIntensity > 0.4
-              ? (sumEdgeIntensity / count) * 0.6 + maxEdgeIntensity * 0.4 // 高强度区域
-              : (sumEdgeIntensity / count) * 0.8 + maxEdgeIntensity * 0.2, // 低强度区域
-        };
-      }
-    }
-  }
-
-  // 更新原始数据 (合并循环)
-  for (let i = 0; i < engine.newPigmentField.length; i++) {
-    if (tempBuffer[i] && tempBuffer[i].isNew) {
-      engine.newPigmentField[i] = {
-        isNew: true,
-        pigmentData: {
-          color: [...tempBuffer[i].pigmentData.color],
-          opacity: tempBuffer[i].pigmentData.opacity,
-        },
-        edgeIntensity: tempBuffer[i].edgeIntensity,
-      };
     }
   }
 }
@@ -356,30 +257,6 @@ export function updatePigmentField(engine: WatercolorEngine): void {
           color: [...newPigment.color],
           opacity: newOpacity,
         };
-      }
-
-      // 应用边缘增强效果到颜料场
-      const edgeIntensity = engine.edgeIntensityField[index];
-      if (edgeIntensity > 0.01) {
-        const color = engine.pigmentField[index].pigmentData.color;
-        const { h, s, l } = RGB2HSL(color[0], color[1], color[2]);
-
-        // 获取笔刷颜色的亮度
-        const brushColor = engine.brush.color;
-        const brushHSL = RGB2HSL(brushColor[0], brushColor[1], brushColor[2]);
-
-        // 根据原亮度计算降低幅度
-        const lightnessFactor = Math.pow(l, 0.5);
-        const lightnessReduction =
-          edgeIntensity * (0.3 - 0.2 * lightnessFactor) * 0.1;
-
-        // 限制最低亮度为笔刷亮度的三分之一
-        const minL = brushHSL.l / 2;
-        const newL = Math.max(minL, l - lightnessReduction);
-
-        // 只调整亮度
-        const { r, g, b } = HSL2RGB(h, s, newL);
-        engine.pigmentField[index].pigmentData.color = [r, g, b];
       }
     }
   }
@@ -510,107 +387,4 @@ export function updatePigmentField(engine: WatercolorEngine): void {
       }
     }
   }
-
-  // 添加高斯模糊处理边缘强度场
-  applyGaussianBlurToEdgeField(engine);
-}
-
-/**
- * 高斯模糊处理边缘强度场
- */
-export function applyGaussianBlurToEdgeField(engine: WatercolorEngine): void {
-  // 获取处理区域
-  const { left, right, top, bottom } = engine.getRegion(
-    engine.brushCenterX,
-    engine.brushCenterY,
-    engine.brushRadius * 1.5
-  );
-
-  // 创建临时缓冲区
-  const tempEdgeField = new Float32Array(
-    engine.canvasWidth * engine.canvasHeight
-  );
-  tempEdgeField.set(engine.edgeIntensityField);
-
-  // 高斯核权重 (简化为3x3核来减少代码量)
-  const kernel = [
-    [0.075, 0.124, 0.075],
-    [0.124, 0.204, 0.124],
-    [0.075, 0.124, 0.075],
-  ];
-
-  // 应用高斯模糊
-  for (let y = top; y <= bottom; y++) {
-    for (let x = left; x <= right; x++) {
-      const index = y * engine.canvasWidth + x;
-      if (engine.edgeIntensityField[index] > 0.01) {
-        let sum = 0,
-          weightSum = 0;
-
-        // 应用3x3高斯核
-        for (let ky = -1; ky <= 1; ky++) {
-          for (let kx = -1; kx <= 1; kx++) {
-            const nx = x + kx,
-              ny = y + ky;
-            if (
-              nx >= 0 &&
-              nx < engine.canvasWidth &&
-              ny >= 0 &&
-              ny < engine.canvasHeight
-            ) {
-              const nIndex = ny * engine.canvasWidth + nx;
-              const weight = kernel[ky + 1][kx + 1];
-              sum += engine.edgeIntensityField[nIndex] * weight;
-              weightSum += weight;
-            }
-          }
-        }
-
-        if (weightSum > 0) tempEdgeField[index] = sum / weightSum;
-      }
-    }
-  }
-
-  // 更新边缘强度场 (直接复制，减少循环)
-  for (let i = 0; i < engine.edgeIntensityField.length; i++) {
-    engine.edgeIntensityField[i] = tempEdgeField[i];
-  }
-}
-
-/**
- * 将三层边缘效果混合到颜料场中
- */
-export function mergeEdgesToPigment(engine: WatercolorEngine): void {
-  for (let i = 0; i < engine.canvasWidth * engine.canvasHeight; i++) {
-    if (!engine.pigmentField[i].isOld) continue;
-
-    // 计算综合边缘效果 - 与渲染权重保持一致
-    const totalEdgeEffect =
-      engine.firstLayerEdgeField[i] * 0.25 +
-      engine.secondLayerEdgeField[i] * 0.75 +
-      engine.thirdLayerPersistentField[i] * 0.50;
-
-    if (totalEdgeEffect > 0.01) {
-      const color = engine.pigmentField[i].pigmentData.color;
-      const { h, s, l } = RGB2HSL(color[0], color[1], color[2]);
-
-      // 根据原亮度计算降低幅度
-      const lightnessFactor = Math.pow(l, 0.5);
-      const lightnessReduction =
-        totalEdgeEffect * (0.25 - 0.15 * lightnessFactor) * 0.2; // 降低混合强度
-
-      // 限制最低亮度
-      const minL = 0.2;
-      const newL = Math.max(minL, l - lightnessReduction);
-
-      // 只调整亮度
-      const { r, g, b } = HSL2RGB(h, s, newL);
-      engine.pigmentField[i].pigmentData.color = [r, g, b];
-    }
-  }
-
-  // 混合完毕后只清空第二层（局部边缘），保留第一层
-  engine.secondLayerEdgeField.fill(0);
-  // 第一层保持不变，第三层的持久扩散效果也继续保留
-  // 第三层的扩散效果会在下次绘制时逐渐消失或被新的扩散覆盖
 }

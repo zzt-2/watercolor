@@ -12,9 +12,8 @@ import {
 import {
   calculateWetAreaEdges,
   render,
-  
+  clearThirdLayerAtPosition,
 } from "./utils/watercolorEdgeHandling";
-import { mergeEdgesToPigment } from "./utils/watercolorDiffusion";
 import { processNewPigmentAddition } from "./utils/watercolorProcessing";
 
 /**
@@ -51,7 +50,6 @@ class WatercolorEngine {
   public brushCenterX: number = 0;
   public brushCenterY: number = 0;
   public brushRadius: number = 0;
-  public edgeIntensityField: Float32Array;
   public wetField: Float32Array;
 
   public strokeCount: number = 0;
@@ -74,6 +72,8 @@ class WatercolorEngine {
   public dragDirectionX: number = 0;
   public dragDirectionY: number = 0;
   public hasDragDirection: boolean = false;
+  public dragDirectionHistory: Array<{x: number, y: number}> = [];
+  public directionWeights: number[] = [0.4, 0.3, 0.2, 0.1];
 
   constructor(canvasElement: HTMLCanvasElement, width: number, height: number) {
     this.canvasWidth = width;
@@ -91,7 +91,6 @@ class WatercolorEngine {
     this.closestPigmentY = new Int32Array(size);
     this.gradientFieldX = new Float32Array(size);
     this.gradientFieldY = new Float32Array(size);
-    this.edgeIntensityField = new Float32Array(size);
     this.wetField = new Float32Array(size);
     this.overlapMask = new Float32Array(size);
 
@@ -250,6 +249,61 @@ class WatercolorEngine {
   }
 
   /**
+   * 更新拖动方向历史记录
+   */
+  private updateDirectionHistory(dx: number, dy: number): void {
+    const magnitude = Math.sqrt(dx * dx + dy * dy);
+    if (magnitude > 0) {
+      // 标准化方向向量
+      const normalizedDirection = {
+        x: dx / magnitude,
+        y: dy / magnitude
+      };
+      
+      // 添加到历史记录
+      this.dragDirectionHistory.push(normalizedDirection);
+      
+      // 保持数组长度为4
+      if (this.dragDirectionHistory.length > 4) {
+        this.dragDirectionHistory.shift();
+      }
+    }
+  }
+
+  /**
+   * 计算加权平均方向
+   */
+  private calculateWeightedDirection(): {x: number, y: number} {
+    if (this.dragDirectionHistory.length === 0) {
+      return {x: 0, y: 0};
+    }
+    
+    let weightedX = 0;
+    let weightedY = 0;
+    let totalWeight = 0;
+    
+    // 使用最近的方向获得更高权重
+    for (let i = 0; i < this.dragDirectionHistory.length; i++) {
+      const weight = this.directionWeights[i] || 0.1; // 如果权重不够，使用默认值
+      const direction = this.dragDirectionHistory[this.dragDirectionHistory.length - 1 - i]; // 从最近的开始
+      
+      weightedX += direction.x * weight;
+      weightedY += direction.y * weight;
+      totalWeight += weight;
+    }
+    
+    // 标准化
+    if (totalWeight > 0) {
+      return {
+        x: weightedX / totalWeight,
+        y: weightedY / totalWeight
+      };
+    }
+    
+    return {x: 0, y: 0};
+  }
+
+  /**
    * 更新拖动方向
    */
   public updateDragDirection(currentX: number, currentY: number): void {
@@ -259,9 +313,19 @@ class WatercolorEngine {
       const magnitude = Math.sqrt(dx * dx + dy * dy);
       
       if (magnitude > 0) {
-        this.dragDirectionX = dx / magnitude;
-        this.dragDirectionY = dy / magnitude;
-        this.hasDragDirection = true;
+        // 更新方向历史
+        this.updateDirectionHistory(dx, dy);
+        
+        // 计算加权平均方向
+        const avgDirection = this.calculateWeightedDirection();
+        
+        // 只有当累计方向足够强时才更新主方向
+        const avgMagnitude = Math.sqrt(avgDirection.x * avgDirection.x + avgDirection.y * avgDirection.y);
+        if (avgMagnitude > 0.1) { // 阈值避免微小抖动
+          this.dragDirectionX = avgDirection.x;
+          this.dragDirectionY = avgDirection.y;
+          this.hasDragDirection = true;
+        }
       }
     }
   }
@@ -273,6 +337,7 @@ class WatercolorEngine {
     this.dragDirectionX = 0;
     this.dragDirectionY = 0;
     this.hasDragDirection = false;
+    this.dragDirectionHistory = []; // 清空方向历史
     // 清空第三层临时场，为下次拖动做准备
     this.thirdLayerTempField.fill(0);
   }
@@ -286,6 +351,7 @@ class WatercolorEngine {
     
     // 只在尺寸变化时重新创建数组
     if (this.thirdLayerTempSize !== tempSize) {
+      console.log("ensureThirdLayerTempSize", tempSize);
       this.thirdLayerTempField = new Float32Array(tempSize);
       this.thirdLayerTempSize = tempSize;
     }
@@ -306,15 +372,14 @@ class WatercolorEngine {
   public initArrays = () => initArrays(this);
   public calculateWetAreaEdges = () => calculateWetAreaEdges(this);
   public render = () => render(this);
+  public clearThirdLayerAtPosition = (centerX: number, centerY: number, radius: number) => 
+    clearThirdLayerAtPosition(this, centerX, centerY, radius);
 
   public processNewPigmentAddition = (
     centerX: number,
     centerY: number,
     radius: number
   ) => processNewPigmentAddition(this, centerX, centerY, radius);
-
-  // 添加新的方法暴露
-  public mergeEdgesToPigment = () => mergeEdgesToPigment(this);
 }
 
 export { WatercolorEngine };

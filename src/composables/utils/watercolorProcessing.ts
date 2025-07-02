@@ -8,7 +8,6 @@ import {
 } from "./watercolorFieldComputation";
 import {
   applyDirectionalDiffusion,
-  applyConvolution,
   updatePigmentField,
 } from "./watercolorDiffusion";
 
@@ -45,9 +44,6 @@ export function processNewPigmentAddition(
 
   // 6. 应用方向性扩散（不包含边缘强度扩散）
   applyDirectionalDiffusion(engine, diffusionDirections);
-
-  // 7. 应用3x3均匀卷积
-  applyConvolution(engine);
 
   // 8. 更新颜料场和边缘强度场
   updatePigmentField(engine);
