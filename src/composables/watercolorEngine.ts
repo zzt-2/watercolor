@@ -67,6 +67,9 @@ class WatercolorEngine {
   public thirdLayerTempSize: number = 0;         // 临时层的尺寸
   public thirdLayerTempCenterX: number = 0;      // 临时层中心X
   public thirdLayerTempCenterY: number = 0;      // 临时层中心Y
+  
+  // 调试测试层
+  public debugTestLayer: Float32Array;          // 测试层，用于诊断扩散问题
 
   // 拖动方向追踪
   public dragDirectionX: number = 0;
@@ -102,6 +105,9 @@ class WatercolorEngine {
     this.thirdLayerPersistentField = new Float32Array(size);
     // thirdLayerTempField初始化为空数组，将在第一次使用时动态创建
     this.thirdLayerTempField = new Float32Array(0);
+    
+    // 初始化调试测试层
+    this.debugTestLayer = new Float32Array(size);
 
     const { left, right, top, bottom } = this.getRegion(
       this.brushCenterX,
@@ -346,7 +352,7 @@ class WatercolorEngine {
    * 确保第三层临时场的大小正确
    */
   public   ensureThirdLayerTempSize(centerX: number, centerY: number, radius: number): void {
-    const tempRadius = Math.ceil(radius);
+    const tempRadius = Math.ceil(radius * 1.2);
     const tempSize = (tempRadius * 2 + 1) * (tempRadius * 2 + 1);
     
     // 只在尺寸变化时重新创建数组

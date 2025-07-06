@@ -58,7 +58,7 @@ export function initP5(engine: WatercolorEngine): void {
     p.mouseReleased = () => {
       engine.isDrawing = false;
       engine.strokeCount = 0;
-      engine.thirdLayerTempField.fill(0);
+      // engine.thirdLayerTempField.fill(0);
       // 重置拖动方向
       engine.resetDragDirection();
     };
@@ -95,6 +95,9 @@ export function initArrays(engine: WatercolorEngine): void {
   // 初始化第三层边缘扩散场
   engine.thirdLayerTempField.fill(0);
   engine.thirdLayerPersistentField.fill(0);
+  
+  // 初始化调试测试层
+  engine.debugTestLayer.fill(0);
 }
 
 /**
