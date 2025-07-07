@@ -56,6 +56,18 @@ export function initP5(engine: WatercolorEngine): void {
     };
 
     p.mouseReleased = () => {
+      if (engine.isDrawing) {
+        // 确保使用整数坐标
+        const mouseX = Math.round(p.mouseX);
+        const mouseY = Math.round(p.mouseY);
+        
+        // 将原色层混入主颜料场
+        engine.mixPrimitiveLayerToPigmentField(mouseX, mouseY, engine.brush.size);
+        
+        // 清空原色层
+        engine.clearPrimitiveLayer(mouseX, mouseY, engine.brush.size);
+      }
+      
       engine.isDrawing = false;
       engine.strokeCount = 0;
       // engine.thirdLayerTempField.fill(0);
@@ -109,6 +121,7 @@ export function initComplexArrays(
 ): void {
   engine.pigmentField = Array(size);
   engine.newPigmentField = Array(size);
+  engine.primitiveColorField = Array(size);
   for (let i = 0; i < size; i++) {
     const defaultColor = [255, 255, 255] as [number, number, number];
     engine.pigmentField[i] = {
@@ -120,6 +133,11 @@ export function initComplexArrays(
       isNew: false,
       pigmentData: { color: [...defaultColor], opacity: 1 },
       edgeIntensity: 0,
+    };
+
+    engine.primitiveColorField[i] = {
+      hasPrimitive: false,
+      pigmentData: { color: [...defaultColor], opacity: 1 },
     };
 
     // 初始化lastBrushPigment数组元素

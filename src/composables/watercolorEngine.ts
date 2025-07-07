@@ -14,7 +14,11 @@ import {
   render,
   clearThirdLayerAtPosition,
 } from "./utils/watercolorEdgeHandling";
-import { processNewPigmentAddition } from "./utils/watercolorProcessing";
+import { 
+  processNewPigmentAddition,
+  mixPrimitiveLayerToPigmentField,
+  clearPrimitiveLayer,
+} from "./utils/watercolorProcessing";
 
 /**
  * 水彩引擎类
@@ -43,6 +47,10 @@ class WatercolorEngine {
     isNew: boolean;
     pigmentData: PigmentData;
     edgeIntensity: number;
+  }> = [];
+  public primitiveColorField: Array<{
+    hasPrimitive: boolean;
+    pigmentData: PigmentData;
   }> = [];
   public existingPigmentPoints: Array<{ x: number; y: number }> = [];
   public pigmentCenters: Array<{ x: number; y: number; radius: number }> = [];
@@ -147,6 +155,13 @@ class WatercolorEngine {
           opacity: 1,
         },
         edgeIntensity: 0,
+      };
+      this.primitiveColorField[i] = {
+        hasPrimitive: false,
+        pigmentData: {
+          color: [255, 255, 255] as [number, number, number],
+          opacity: 1,
+        },
       };
     }
     this.existingPigmentPoints = [];
@@ -386,6 +401,18 @@ class WatercolorEngine {
     centerY: number,
     radius: number
   ) => processNewPigmentAddition(this, centerX, centerY, radius);
+  
+  public mixPrimitiveLayerToPigmentField = (
+    centerX: number,
+    centerY: number,
+    radius: number
+  ) => mixPrimitiveLayerToPigmentField(this, centerX, centerY, radius);
+  
+  public clearPrimitiveLayer = (
+    centerX: number,
+    centerY: number,
+    radius: number
+  ) => clearPrimitiveLayer(this, centerX, centerY, radius);
 }
 
 export { WatercolorEngine };

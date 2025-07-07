@@ -1005,6 +1005,18 @@ export function render(engine: WatercolorEngine): void {
       // 获取基础颜色
       const finalColor = engine.pigmentField[index].pigmentData.color;
 
+      // 检查原色层并混合
+      let renderColor = finalColor;
+      if (engine.primitiveColorField[index].hasPrimitive) {
+        const primitiveColor = engine.primitiveColorField[index].pigmentData.color;
+        // 使用mixbox.lerp混合：finalColor * 0.7 + primitiveColor * 0.3
+        renderColor = mixbox.lerp(
+          `rgb(${finalColor.join(",")})`,
+          `rgb(${primitiveColor.join(",")})`,
+          0.1
+        );
+      }
+
       // 直接使用原始数据（已经过平滑处理）
       const thirdLayerValue = engine.thirdLayerPersistentField[index];
 
@@ -1017,9 +1029,9 @@ export function render(engine: WatercolorEngine): void {
       // 处理边缘效果 - 保持现有的 HSL 处理方式
       if (combinedEdgeEffect > 0.01) {
         const { h, s, l } = RGB2HSL(
-          finalColor[0],
-          finalColor[1],
-          finalColor[2]
+          renderColor[0],
+          renderColor[1],
+          renderColor[2]
         );
 
         // 根据原亮度计算降低幅度
@@ -1034,9 +1046,9 @@ export function render(engine: WatercolorEngine): void {
         engine.p5Instance.pixels[pix + 1] = g;
         engine.p5Instance.pixels[pix + 2] = b;
       } else {
-        engine.p5Instance.pixels[pix] = finalColor[0];
-        engine.p5Instance.pixels[pix + 1] = finalColor[1];
-        engine.p5Instance.pixels[pix + 2] = finalColor[2];
+        engine.p5Instance.pixels[pix] = renderColor[0];
+        engine.p5Instance.pixels[pix + 1] = renderColor[1];
+        engine.p5Instance.pixels[pix + 2] = renderColor[2];
       }
     }
   }

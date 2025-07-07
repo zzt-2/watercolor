@@ -274,7 +274,7 @@ export function updatePigmentField(engine: WatercolorEngine): void {
   );
 
   // 保留原有颜色的比例
-  const retentionRatio = 0.03; // averageColor占小比例
+  const retentionRatio = 0.05; // averageColor占小比例
   const innerCircleRadiusFactor = 1; // 内圈半径因子
 
   // 1. 在内圈区域计算平均颜色

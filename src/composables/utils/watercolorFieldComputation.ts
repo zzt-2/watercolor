@@ -103,6 +103,13 @@ export function setUniformPigmentDistribution(
         color: pigmentColor,
         opacity: engine.brush.opacity * opacityFactor,
       };
+
+      // 设置原色层 - 完全均匀的笔刷颜色，不参与混色
+      engine.primitiveColorField[index].hasPrimitive = true;
+      engine.primitiveColorField[index].pigmentData = {
+        color: [...engine.brush.color],
+        opacity: engine.brush.opacity,
+      };
     }
   }
 
