@@ -128,7 +128,7 @@ function injectTriggerIntensity(
 /**
  * 应用动态平衡衰减到临时层
  */
-function applyDynamicDecay(engine: WatercolorEngine): void {
+function applyDynamicDecay(engine: WatercolorEngine, diffusionMask: Float32Array): void {
   const tempRadius = Math.ceil(engine.brushRadius * 1.2);
   const originalRadius = engine.brushRadius; // 保持原始半径用于衰减计算
   const tempSize = tempRadius * 2 + 1;
@@ -152,18 +152,24 @@ function applyDynamicDecay(engine: WatercolorEngine): void {
         
           // 大幅减弱衰减曲线：让扩散效果更持久
           let decayFactor;
-          if (normalizedDistance < 0.3) {
-            // 内圈：极微衰减，促进向外扩散
+          if (diffusionMask[tempIndex] < 0.3) {
             decayFactor = 0.999 - 0.001 * (normalizedDistance / 0.3); // 从0.98-0.02改为0.995-0.005
-          } else if (normalizedDistance < 0.7) {
-            // 中圈：轻微衰减，减少粘滞
-            const midRatio = (normalizedDistance - 0.3) / 0.4;
-            decayFactor = 0.995 - 0.005 * midRatio; // 从0.95-0.05改为0.99-0.01
           } else {
-            // 外圈：极轻微衰减，保持扩散范围
-            const outerRatio = (normalizedDistance - 0.7) / 0.3;
-            decayFactor = 0.985 - 0.015 * outerRatio; // 从0.9-0.1改为0.985-0.005
+            engine.debugTestLayer[tempIndex] = 1.0;
+            if (normalizedDistance < 0.3) {
+              // 内圈：极微衰减，促进向外扩散
+              decayFactor = 0.999 - 0.001 * (normalizedDistance / 0.3); // 从0.98-0.02改为0.995-0.005
+            } else if (normalizedDistance < 0.7) {
+              // 中圈：轻微衰减，减少粘滞
+              const midRatio = (normalizedDistance - 0.3) / 0.4;
+              decayFactor = 0.995 - 0.005 * midRatio; // 从0.95-0.05改为0.99-0.01
+            } else {
+              // 外圈：极轻微衰减，保持扩散范围
+              const outerRatio = (normalizedDistance - 0.7) / 0.3;
+              decayFactor = 0.985 - 0.015 * outerRatio; // 从0.9-0.1改为0.985-0.005
+            }
           }
+          
           
           engine.thirdLayerTempField[tempIndex] *= decayFactor;
           
@@ -291,14 +297,13 @@ function applyFieldDiffusion(engine: WatercolorEngine, diffusionMask: Float32Arr
       if (distanceFromCenter > tempRadius) continue;
       
       // 根据扩散标记调整扩散强度
-      const maskStrength = diffusionMask[tempIndex];
       let diffusionMultiplier;
-      if (maskStrength > 0.5) {
+      if (diffusionMask[tempIndex] > 0.7) {
         // 标记区域内：正常扩散
-        diffusionMultiplier = 1.0;
-      } else if (maskStrength > 0.1) {
+        diffusionMultiplier = 0.7;
+      } else if (diffusionMask[tempIndex] > 0.3) {
         // 弱标记区域：中等扩散
-        diffusionMultiplier = 0.2;
+        diffusionMultiplier = 0.3;
       } else {
         // 无标记区域：微弱扩散
         diffusionMultiplier = 0.01;
@@ -357,21 +362,17 @@ function applyFieldDiffusion(engine: WatercolorEngine, diffusionMask: Float32Arr
     if (diffusionBuffer[i] > 0) {
       // 增加扩散而来的强度
       engine.thirdLayerTempField[i] = Math.min(1.0, engine.thirdLayerTempField[i] + diffusionBuffer[i]);
+      //
+      // 在测试层中标记扩散到的点
+      const tempY = Math.floor(i / tempSize);
+      const tempX = i % tempSize;
+      const globalX = tempLeft + tempX;
+      const globalY = tempTop + tempY;
       
-      // // 在测试层中标记扩散到的点
-      // const tempY = Math.floor(i / tempSize);
-      // const tempX = i % tempSize;
-      // const globalX = tempLeft + tempX;
-      // const globalY = tempTop + tempY;
-      
-      // if (globalX >= 0 && globalX < engine.canvasWidth && 
-      //     globalY >= 0 && globalY < engine.canvasHeight) {
-      //   const globalIndex = globalY * engine.canvasWidth + globalX;
-      //   // 标记为扩散点（如果不是注入点）
-      //   if (engine.debugTestLayer[globalIndex] < 0.9) {
-      //     engine.debugTestLayer[globalIndex] = 0.5; // 扩散到的点
-      //   }
-      // }
+      if (globalX >= 0 && globalX < engine.canvasWidth && 
+          globalY >= 0 && globalY < engine.canvasHeight) {
+        const globalIndex = globalY * engine.canvasWidth + globalX;
+      }
     }
   }
   
@@ -388,10 +389,21 @@ function applyFieldDiffusion(engine: WatercolorEngine, diffusionMask: Float32Arr
         
         if (distanceFromCenter <= tempRadius) {
           // 根据距离调整损失比例 - 中心损失更多，边缘损失更少
+          let diffusionMultiplier;
+      if (diffusionMask[tempIndex] > 0.7) {
+        // 标记区域内：正常扩散
+        diffusionMultiplier = 0.7;
+      } else if (diffusionMask[tempIndex] > 0.3) {
+        // 弱标记区域：中等扩散
+        diffusionMultiplier = 0.3;
+      } else {
+        // 无标记区域：微弱扩散
+        diffusionMultiplier = 0.01;
+      }
           const normalizedDistance = distanceFromCenter / tempRadius;
           const baseLossRatio = 0.25; // 提高基础损失比例
           const lossRatio = baseLossRatio * (1 - normalizedDistance * 0.5); // 边缘地区损失减半
-          engine.thirdLayerTempField[tempIndex] *= (1 - lossRatio);
+          engine.thirdLayerTempField[tempIndex] *= (1 - lossRatio * diffusionMultiplier);
         }
       }
     }
@@ -408,9 +420,6 @@ function processThirdLayerEdgeDiffusion(engine: WatercolorEngine, triggers: Trig
   // 确保临时层大小正确
   engine.ensureThirdLayerTempSize(engine.brushCenterX, engine.brushCenterY, engine.brushRadius * 1.2);
   
-  // 应用动态平衡衰减
-  applyDynamicDecay(engine);
-  
   // 对每个触发点应用强度注入（而非扩散）
   for (const trigger of triggers) {
     injectTriggerIntensity(engine, trigger.x, trigger.y, trigger.intensity);
@@ -421,6 +430,10 @@ function processThirdLayerEdgeDiffusion(engine: WatercolorEngine, triggers: Trig
   for (const trigger of triggers) {
     markDiffusionArea(engine, trigger.x, trigger.y, diffusionMask);
   }
+
+  // 应用动态平衡衰减
+  applyDynamicDecay(engine, diffusionMask);
+  
   applyFieldDiffusion(engine, diffusionMask);
   
   // 将临时层数据转移到持久层（使用扩展范围）
@@ -993,7 +1006,7 @@ export function render(engine: WatercolorEngine): void {
       const index = x + y * engine.canvasWidth;
       const pix = index * 4;
 
-      // // 测试模式：如果测试层有值，直接显示白色
+      // // // 测试模式：如果测试层有值，直接显示白色
       // if (engine.debugTestLayer[index] > 0.1) {
       //   engine.p5Instance.pixels[pix] = 255;     // R
       //   engine.p5Instance.pixels[pix + 1] = 255; // G  
