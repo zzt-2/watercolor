@@ -490,7 +490,7 @@ function processThirdLayerEdgeDiffusion(engine: WatercolorEngine, triggers: Trig
  * 对第三层持久层进行平滑处理（修改原始数据）
  */
 function smoothThirdLayerPersistentField(engine: WatercolorEngine): void {
-  const smoothRadius = engine.brushRadius * 1.4;
+  const smoothRadius = engine.brushRadius * 1.3;
   const { left, right, top, bottom } = engine.getRegion(
     engine.brushCenterX,
     engine.brushCenterY,
@@ -826,7 +826,7 @@ export function calculateWetAreaEdges(engine: WatercolorEngine): void {
  */
 function applyFinalPigmentSmoothing(engine: WatercolorEngine): void {
   // 合理的平滑半径：覆盖扩散区域但不过度
-  const smoothRadius = engine.brushRadius * 1.4; // 基于实际扩散距离(0.6)的约2倍，更精确
+  const smoothRadius = engine.brushRadius * 2; // 基于实际扩散距离(0.6)的约2倍，更精确
   const { left, right, top, bottom } = engine.getRegion(
     engine.brushCenterX,
     engine.brushCenterY,
