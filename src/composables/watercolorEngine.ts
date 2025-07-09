@@ -89,7 +89,7 @@ class WatercolorEngine {
   // 未处理点队列系统
   public pendingPoints: Array<{x: number, y: number}> = [];
   public isProcessingPoints: boolean = false;
-  public maxQueueSize: number = 100; // 防止队列过大
+  public maxQueueSize: number = 200; // 防止队列过大
 
   constructor(canvasElement: HTMLCanvasElement, width: number, height: number) {
     this.canvasWidth = width;
@@ -461,7 +461,7 @@ class WatercolorEngine {
     
     try {
       let processedCount = 0;
-      const maxProcessPerFrame = 3; // 减少每帧处理点数，因为每个点都会渲染
+      const maxProcessPerFrame = 20; // 减少每帧处理点数，因为每个点都会渲染
       
       while (this.pendingPoints.length > 0 && processedCount < maxProcessPerFrame) {
         if (!this.processSinglePendingPoint()) {

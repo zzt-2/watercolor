@@ -5,6 +5,7 @@ import {
   wetAreaInnerRadiusFactor,
   wetAreaCenterValue,
   UpdateRadius,
+  maxWetValue,
 } from "../constants/watercolorConstants";
 
 /**
@@ -74,7 +75,7 @@ export function setUniformPigmentDistribution(
           wetValue = wetAreaCenterValue * (1 - t);
         }
 
-        engine.wetField[index] = Math.max(engine.wetField[index], wetValue);
+        engine.wetField[index] = Math.min(maxWetValue, engine.wetField[index] +wetValue);
       }
 
       // 跳过圆外的点

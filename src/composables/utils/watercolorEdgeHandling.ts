@@ -117,11 +117,11 @@ function injectTriggerIntensity(
   }
   
   // 增强注入强度，让内圈有足够的扩散动力
-  const injectionStrength = baseIntensity * 0.3;
+  const injectionStrength = baseIntensity * 1;
   
   // 累积到临时层，限制最大值
   const currentValue = engine.thirdLayerTempField[tempIndex];
-  const maxAccumulation = 0.5; // 降低最大累积值
+  const maxAccumulation = 0.6; // 降低最大累积值
   engine.thirdLayerTempField[tempIndex] = Math.min(maxAccumulation, currentValue + injectionStrength);
 }
 
@@ -153,20 +153,20 @@ function applyDynamicDecay(engine: WatercolorEngine, diffusionMask: Float32Array
           // 大幅减弱衰减曲线：让扩散效果更持久
           let decayFactor;
           if (diffusionMask[tempIndex] < 0.3) {
-            decayFactor = 0.999 - 0.001 * (normalizedDistance / 0.3); // 从0.98-0.02改为0.995-0.005
+            decayFactor = 0.9999 - 0.01 * (normalizedDistance / 0.3); // 从0.98-0.02改为0.995-0.005
           } else {
             engine.debugTestLayer[tempIndex] = 1.0;
             if (normalizedDistance < 0.3) {
               // 内圈：极微衰减，促进向外扩散
-              decayFactor = 0.999 - 0.001 * (normalizedDistance / 0.3); // 从0.98-0.02改为0.995-0.005
+              decayFactor = 0.997 - 0.03 * (normalizedDistance / 0.3); // 从0.98-0.02改为0.995-0.005
             } else if (normalizedDistance < 0.7) {
               // 中圈：轻微衰减，减少粘滞
               const midRatio = (normalizedDistance - 0.3) / 0.4;
-              decayFactor = 0.995 - 0.005 * midRatio; // 从0.95-0.05改为0.99-0.01
+              decayFactor = 0.98 - 0.01 * midRatio; // 从0.95-0.05改为0.99-0.01
             } else {
               // 外圈：极轻微衰减，保持扩散范围
               const outerRatio = (normalizedDistance - 0.7) / 0.3;
-              decayFactor = 0.985 - 0.015 * outerRatio; // 从0.9-0.1改为0.985-0.005
+              decayFactor = 0.99 - 0.02 * outerRatio; // 从0.9-0.1改为0.985-0.005
             }
           }
           
@@ -403,7 +403,7 @@ function applyFieldDiffusion(engine: WatercolorEngine, diffusionMask: Float32Arr
       }
         // let diffusionMultiplier = Math.sqrt(diffusionMask[tempIndex]); 
           const normalizedDistance = distanceFromCenter / tempRadius;
-          const baseLossRatio = 0.2; // 提高基础损失比例
+          const baseLossRatio = 0.25; // 提高基础损失比例
           const lossRatio = baseLossRatio * (1 - normalizedDistance * 0.5); // 边缘地区损失减半
           engine.thirdLayerTempField[tempIndex] *= (1 - lossRatio * diffusionMultiplier);
         }
