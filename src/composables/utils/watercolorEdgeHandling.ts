@@ -153,7 +153,7 @@ function applyDynamicDecay(engine: WatercolorEngine, diffusionMask: Float32Array
           // 大幅减弱衰减曲线：让扩散效果更持久
           let decayFactor;
           if (diffusionMask[tempIndex] < 0.3) {
-            decayFactor = 0.9999 - 0.01 * (normalizedDistance / 0.3); // 从0.98-0.02改为0.995-0.005
+            decayFactor = 0.9999 - 0.01 * normalizedDistance; // 从0.98-0.02改为0.995-0.005
           } else {
             engine.debugTestLayer[tempIndex] = 1.0;
             if (normalizedDistance < 0.3) {
