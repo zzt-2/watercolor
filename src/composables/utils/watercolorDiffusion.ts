@@ -240,7 +240,7 @@ export function updatePigmentField(engine: WatercolorEngine): void {
           };
         } else {
           // 计算混合比例并混合颜色
-          const mixRatio = Math.min(1, newOpacity / (newOpacity + oldOpacity));
+          const mixRatio = Math.min(1, 2*newOpacity / (2*newOpacity + oldOpacity));
           engine.pigmentField[index].pigmentData = {
             color: mixbox.lerp(
               `rgb(${oldPigment.color.join(",")})`,
@@ -274,7 +274,7 @@ export function updatePigmentField(engine: WatercolorEngine): void {
   );
 
   // 保留原有颜色的比例
-  const retentionRatio = 0.05; // averageColor占小比例
+  const retentionRatio = 0.01; // averageColor占小比例
   const innerCircleRadiusFactor = 1; // 内圈半径因子
 
   // 1. 在内圈区域计算平均颜色
@@ -292,7 +292,7 @@ export function updatePigmentField(engine: WatercolorEngine): void {
       const distance = Math.sqrt(dx * dx + dy * dy);
 
       if (
-        distance <= engine.brushRadius * innerCircleRadiusFactor &&
+        distance < engine.brushRadius * innerCircleRadiusFactor &&
         engine.pigmentField[index].isOld
       ) {
         const color = engine.pigmentField[index].pigmentData.color;
@@ -373,7 +373,7 @@ export function updatePigmentField(engine: WatercolorEngine): void {
         const protectedL = fieldHSL.l * (1 - lightnessProtectionRatio) + brushHSL.l * lightnessProtectionRatio;
         
         // 确保亮度不会低于原始笔刷亮度的80%
-        const minAllowedL = brushHSL.l * 0.8;
+        const minAllowedL = brushHSL.l * 0.7;
         const finalL = Math.max(minAllowedL, protectedL);
         
         // 转换回RGB

@@ -117,11 +117,11 @@ function injectTriggerIntensity(
   }
   
   // 增强注入强度，让内圈有足够的扩散动力
-  const injectionStrength = baseIntensity * 0.1;
+  const injectionStrength = baseIntensity * 0.3;
   
   // 累积到临时层，限制最大值
   const currentValue = engine.thirdLayerTempField[tempIndex];
-  const maxAccumulation = 0.7; // 降低最大累积值
+  const maxAccumulation = 0.5; // 降低最大累积值
   engine.thirdLayerTempField[tempIndex] = Math.min(maxAccumulation, currentValue + injectionStrength);
 }
 
@@ -308,10 +308,11 @@ function applyFieldDiffusion(engine: WatercolorEngine, diffusionMask: Float32Arr
         // 无标记区域：微弱扩散
         diffusionMultiplier = 0.01;
       }
+      // let diffusionMultiplier = Math.sqrt(diffusionMask[tempIndex]);
       
       // 简化的扩散强度计算 - 加入标记调制
       const normalizedDistance = distanceFromCenter / tempRadius;
-      const baseIntensity = currentValue * 0.5 * diffusionMultiplier; // 应用标记调制
+      const baseIntensity = currentValue * 0.4 * diffusionMultiplier; // 应用标记调制
       
       // 向8邻域扩散
       for (const [offsetX, offsetY] of neighbors) {
@@ -400,8 +401,9 @@ function applyFieldDiffusion(engine: WatercolorEngine, diffusionMask: Float32Arr
         // 无标记区域：微弱扩散
         diffusionMultiplier = 0.01;
       }
+        // let diffusionMultiplier = Math.sqrt(diffusionMask[tempIndex]); 
           const normalizedDistance = distanceFromCenter / tempRadius;
-          const baseLossRatio = 0.25; // 提高基础损失比例
+          const baseLossRatio = 0.2; // 提高基础损失比例
           const lossRatio = baseLossRatio * (1 - normalizedDistance * 0.5); // 边缘地区损失减半
           engine.thirdLayerTempField[tempIndex] *= (1 - lossRatio * diffusionMultiplier);
         }
@@ -567,49 +569,6 @@ function smoothThirdLayerPersistentField(engine: WatercolorEngine): void {
         engine.thirdLayerPersistentField[index] = tempBuffer[index];
       }
     }
-  }
-}
-
-/**
- * 计算第三层的局部平滑值（不修改原始数据，用于渲染时显示）
- */
-function calculateSmoothedThirdLayerValue(engine: WatercolorEngine, x: number, y: number): number {
-  const index = y * engine.canvasWidth + x;
-  
-  // 如果原始值很小，直接返回
-  if (engine.thirdLayerPersistentField[index] < 0.001) {
-    return engine.thirdLayerPersistentField[index];
-  }
-
-  // 简化版本：只对3x3邻域进行单次平滑，模拟3次迭代的效果
-  let sum = 0;
-  let count = 0;
-
-  // 遍历3x3邻域
-  for (let ky = -1; ky <= 1; ky++) {
-    for (let kx = -1; kx <= 1; kx++) {
-      const nx = x + kx;
-      const ny = y + ky;
-      
-      if (nx >= 0 && nx < engine.canvasWidth && 
-          ny >= 0 && ny < engine.canvasHeight) {
-        const nIndex = ny * engine.canvasWidth + nx;
-        const value = engine.thirdLayerPersistentField[nIndex];
-        
-        // 模拟3次迭代的平滑效果：增强中心权重，减少边缘权重
-        const weight = (kx === 0 && ky === 0) ? 2.0 : 0.8; // 更强的中心权重
-        
-        sum += value * weight;
-        count += weight;
-      }
-    }
-  }
-
-  // 计算平滑后的值
-  if (count > 0) {
-    return sum / count;
-  } else {
-    return engine.thirdLayerPersistentField[index];
   }
 }
 
@@ -1037,7 +996,7 @@ export function render(engine: WatercolorEngine): void {
       const combinedEdgeEffect =
         engine.firstLayerEdgeField[index] * 0.55 + // 全画布持久边缘
         engine.secondLayerEdgeField[index] * 0.85 + // 笔刷局部边缘
-        thirdLayerValue * 1.20; // 直接使用已平滑的原始数据
+        thirdLayerValue * 1.0; // 直接使用已平滑的原始数据
 
       // 处理边缘效果 - 保持现有的 HSL 处理方式
       if (combinedEdgeEffect > 0.01) {

@@ -86,6 +86,11 @@ class WatercolorEngine {
   public dragDirectionHistory: Array<{x: number, y: number}> = [];
   public directionWeights: number[] = [0.4, 0.3, 0.2, 0.1];
 
+  // 未处理点队列系统
+  public pendingPoints: Array<{x: number, y: number}> = [];
+  public isProcessingPoints: boolean = false;
+  public maxQueueSize: number = 100; // 防止队列过大
+
   constructor(canvasElement: HTMLCanvasElement, width: number, height: number) {
     this.canvasWidth = width;
     this.canvasHeight = height;
@@ -361,6 +366,177 @@ class WatercolorEngine {
     this.dragDirectionHistory = []; // 清空方向历史
     // 清空第三层临时场，为下次拖动做准备
     this.thirdLayerTempField.fill(0);
+  }
+
+  /**
+   * 添加未处理点到队列
+   */
+  public addPendingPoint(x: number, y: number): void {
+    // 防止队列过大
+    if (this.pendingPoints.length >= this.maxQueueSize) {
+      console.warn('Pending points queue is full, dropping oldest points');
+      this.pendingPoints.splice(0, this.pendingPoints.length - this.maxQueueSize + 1);
+    }
+    
+    this.pendingPoints.push({ x, y });
+  }
+
+  /**
+   * 使用Bresenham算法计算两点间的所有像素点
+   */
+  public getLinePoints(x0: number, y0: number, x1: number, y1: number): Array<{x: number, y: number}> {
+    const points: Array<{x: number, y: number}> = [];
+    
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    
+    let x = x0;
+    let y = y0;
+    
+    while (true) {
+      points.push({ x, y });
+      
+      if (x === x1 && y === y1) break;
+      
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+    }
+    
+    return points;
+  }
+
+  /**
+   * 添加两点间的所有中间点到待处理队列
+   */
+  public addLineToQueue(fromX: number, fromY: number, toX: number, toY: number): void {
+    const linePoints = this.getLinePoints(fromX, fromY, toX, toY);
+    
+    // 跳过起点（通常已经处理过）
+    for (let i = 1; i < linePoints.length; i++) {
+      this.addPendingPoint(linePoints[i].x, linePoints[i].y);
+    }
+  }
+
+  /**
+   * 处理一个未处理点
+   */
+  public processSinglePendingPoint(): boolean {
+    if (this.pendingPoints.length === 0) {
+      return false;
+    }
+    
+    const point = this.pendingPoints.shift();
+    if (!point) return false;
+    
+    // 处理这个点
+    console.log("processSinglePendingPoint", point.x, point.y);
+    this.processNewPigmentAddition(point.x, point.y, this.brush.size);
+    this.updateDragDirection(point.x, point.y);
+    
+    // 处理完每个点后立即渲染，提供流畅的视觉反馈
+    this.render();
+    
+    return true;
+  }
+
+  /**
+   * 处理所有未处理点
+   */
+  public processAllPendingPoints(): void {
+    if (this.isProcessingPoints) {
+      return; // 防止重入
+    }
+    
+    this.isProcessingPoints = true;
+    
+    try {
+      let processedCount = 0;
+      const maxProcessPerFrame = 3; // 减少每帧处理点数，因为每个点都会渲染
+      
+      while (this.pendingPoints.length > 0 && processedCount < maxProcessPerFrame) {
+        if (!this.processSinglePendingPoint()) {
+          break;
+        }
+        processedCount++;
+      }
+      
+      // 如果还有未处理点，安排下一帧继续处理
+      if (this.pendingPoints.length > 0) {
+        requestAnimationFrame(() => {
+          this.isProcessingPoints = false;
+          this.processAllPendingPoints();
+        });
+      } else {
+        this.isProcessingPoints = false;
+        // 不需要在这里渲染，因为每个点处理时都已经渲染过了
+      }
+    } catch (error) {
+      console.error('Error processing pending points:', error);
+      this.isProcessingPoints = false;
+    }
+  }
+
+  /**
+   * 清空未处理点队列
+   */
+  public clearPendingPoints(): void {
+    this.pendingPoints = [];
+    this.isProcessingPoints = false;
+  }
+
+  /**
+   * 调度渲染，确保在异步处理时正确渲染
+   */
+  public scheduleRender(): void {
+    if (!this.isProcessingPoints) {
+      this.render();
+    } else {
+      // 如果正在处理点，延迟渲染
+      requestAnimationFrame(() => {
+        if (!this.isProcessingPoints) {
+          this.render();
+        } else {
+          this.scheduleRender(); // 递归调度直到处理完成
+        }
+      });
+    }
+  }
+
+  /**
+   * 等待队列处理完成，然后执行回调
+   */
+  public waitForProcessingComplete(callback: () => void, maxWaitTime: number = 5000): void {
+    const startTime = Date.now();
+    
+    const checkComplete = () => {
+      // 检查是否处理完成
+      if (!this.isProcessingPoints && this.pendingPoints.length === 0) {
+        callback();
+        return;
+      }
+      
+      // 检查是否超时
+      if (Date.now() - startTime > maxWaitTime) {
+        console.warn('等待队列处理完成超时，强制执行回调');
+        callback();
+        return;
+      }
+      
+      // 继续等待
+      requestAnimationFrame(checkComplete);
+    };
+    
+    checkComplete();
   }
 
   /**
