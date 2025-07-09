@@ -21,24 +21,22 @@ export function applyDirectionalDiffusion(
     engine.brushRadius
   );
 
-  // 创建临时缓冲区
-  const tempBuffer = Array(engine.canvasWidth * engine.canvasHeight)
-    .fill(null)
-    .map(() => ({
-      isNew: false,
-      pigmentData: {
-        color: [255, 255, 255] as [number, number, number],
-        opacity: 0,
-      },
-      edgeIntensity: 0,
-    }));
+  // 创建局部临时缓冲区（性能优化：只为需要的区域分配内存）
+  const tempBuffer = new Map<number, {
+    isNew: boolean;
+    pigmentData: {
+      color: [number, number, number];
+      opacity: number;
+    };
+    edgeIntensity: number;
+  }>();
 
   // 复制现有数据到临时缓冲区
   for (let y = top; y <= bottom; y++) {
     for (let x = left; x <= right; x++) {
       const index = y * engine.canvasWidth + x;
       if (engine.newPigmentField[index].isNew) {
-        tempBuffer[index] = { ...engine.newPigmentField[index] };
+        tempBuffer.set(index, { ...engine.newPigmentField[index] });
       }
     }
   }
@@ -141,29 +139,30 @@ export function applyDirectionalDiffusion(
         const targetIndex = diffusionY * engine.canvasWidth + diffusionX;
         const diffusionAmount = perPointAmount * (1 - (i / numPoints) * 0.3);
 
-        if (!tempBuffer[targetIndex].isNew) {
-          tempBuffer[targetIndex] = {
+        const existingBuffer = tempBuffer.get(targetIndex);
+        if (!existingBuffer || !existingBuffer.isNew) {
+          tempBuffer.set(targetIndex, {
             isNew: true,
             pigmentData: {
               color: [...engine.newPigmentField[index].pigmentData.color],
               opacity: diffusionAmount,
             },
             edgeIntensity: 0,
-          };
+          });
         } else {
           // 混合颜色
-          const currentColor = tempBuffer[targetIndex].pigmentData.color;
+          const currentColor = existingBuffer.pigmentData.color;
           const newColor = engine.newPigmentField[index].pigmentData.color;
-          const currentOpacity = tempBuffer[targetIndex].pigmentData.opacity;
+          const currentOpacity = existingBuffer.pigmentData.opacity;
 
-          tempBuffer[targetIndex].pigmentData.color = currentColor.map((c, i) =>
+          existingBuffer.pigmentData.color = currentColor.map((c: number, i: number) =>
             Math.round(
               (c * currentOpacity + newColor[i] * diffusionAmount) /
                 (currentOpacity + diffusionAmount)
             )
           ) as [number, number, number];
 
-          tempBuffer[targetIndex].pigmentData.opacity = Math.min(
+          existingBuffer.pigmentData.opacity = Math.min(
             1,
             currentOpacity + diffusionAmount
           );
@@ -171,7 +170,10 @@ export function applyDirectionalDiffusion(
       }
 
       // 更新源点的剩余颜料
-      tempBuffer[index].pigmentData.opacity = Math.max(0, remainingOpacity);
+      const sourceBuffer = tempBuffer.get(index);
+      if (sourceBuffer) {
+        sourceBuffer.pigmentData.opacity = Math.max(0, remainingOpacity);
+      }
     }
   }
 
@@ -186,12 +188,13 @@ export function applyDirectionalDiffusion(
         y < engine.canvasHeight
       ) {
         const index = y * engine.canvasWidth + x;
-        if (tempBuffer[index] && tempBuffer[index].isNew) {
+        const bufferData = tempBuffer.get(index);
+        if (bufferData && bufferData.isNew) {
           engine.newPigmentField[index] = {
             isNew: true,
             pigmentData: {
-              color: [...tempBuffer[index].pigmentData.color],
-              opacity: tempBuffer[index].pigmentData.opacity,
+              color: [...bufferData.pigmentData.color] as [number, number, number],
+              opacity: bufferData.pigmentData.opacity,
             },
             edgeIntensity: 0,
           };

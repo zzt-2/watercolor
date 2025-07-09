@@ -822,127 +822,121 @@ export function calculateWetAreaEdges(engine: WatercolorEngine): void {
 }
 
 /**
- * 对最终颜料场进行圆形渐变平滑处理，消除扩散产生的锯齿
+ * 对最终颜料场进行圆形渐变平滑处理，消除扩散产生的锯齿 - 优化版本
  */
 function applyFinalPigmentSmoothing(engine: WatercolorEngine): void {
-  // 合理的平滑半径：覆盖扩散区域但不过度
-  const smoothRadius = engine.brushRadius * 2; // 基于实际扩散距离(0.6)的约2倍，更精确
+  const smoothRadius = engine.brushRadius * 2;
   const { left, right, top, bottom } = engine.getRegion(
     engine.brushCenterX,
     engine.brushCenterY,
     smoothRadius
   );
 
-  // 创建临时缓冲区
-  const tempColorBuffer: Array<[number, number, number]> = [];
-  const tempOpacityBuffer: number[] = [];
-  
-  // 初始化缓冲区
-  for (let i = 0; i < engine.canvasWidth * engine.canvasHeight; i++) {
-    tempColorBuffer[i] = [255, 255, 255];
-    tempOpacityBuffer[i] = 0;
-  }
+  // 预筛选需要处理的像素，避免全画布遍历
+  const pixelsToProcess: Array<{
+    index: number;
+    x: number;
+    y: number;
+    distance: number;
+    originalR: number;
+    originalG: number;
+    originalB: number;
+    originalOpacity: number;
+  }> = [];
 
-  // 应用圆形区域内的3x3平滑
+  // 第一阶段：筛选并缓存需要处理的像素
   for (let y = top + 1; y < bottom - 1; y++) {
     for (let x = left + 1; x < right - 1; x++) {
       const index = y * engine.canvasWidth + x;
       
-      // 计算到笔刷中心的距离
+      // 只处理有颜料的像素
+      if (!engine.pigmentField[index].isOld) continue;
+      
       const dx = x - engine.brushCenterX;
       const dy = y - engine.brushCenterY;
       const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
       
       // 只在圆形范围内进行平滑
-      if (distanceFromCenter > smoothRadius) {
-        continue;
-      }
+      if (distanceFromCenter > smoothRadius) continue;
       
-      // 只平滑有颜料的区域
-      if (!engine.pigmentField[index].isOld) {
-        continue;
-      }
-
-      // 计算平滑强度：距离中心越远，平滑越强
-      const normalizedDistance = distanceFromCenter / smoothRadius;
-      const smoothingStrength = 0.3 + 0.7 * normalizedDistance; // 从30%到100%
-
-      let sumR = 0, sumG = 0, sumB = 0, sumOpacity = 0;
-      let count = 0;
-
-      // 遍历3x3邻域
-      for (let ky = -1; ky <= 1; ky++) {
-        for (let kx = -1; kx <= 1; kx++) {
-          const nx = x + kx;
-          const ny = y + ky;
-          
-          if (nx >= 0 && nx < engine.canvasWidth && 
-              ny >= 0 && ny < engine.canvasHeight) {
-            const nIndex = ny * engine.canvasWidth + nx;
-            
-            let color: [number, number, number];
-            let opacity: number;
-            
-            if (engine.pigmentField[nIndex].isOld) {
-              color = engine.pigmentField[nIndex].pigmentData.color;
-              opacity = engine.pigmentField[nIndex].pigmentData.opacity;
-            } else {
-              // 空白区域使用背景色
-              color = [255, 255, 255];
-              opacity = 0;
-            }
-            
-            // 使用与边缘平滑相同的权重
-            const weight = (kx === 0 && ky === 0) ? 1.5 : 1.0;
-            
-            sumR += color[0] * weight;
-            sumG += color[1] * weight;
-            sumB += color[2] * weight;
-            sumOpacity += opacity * weight;
-            count += weight;
-          }
-        }
-      }
-
-      // 更新平滑结果，使用混合而非完全替换
-      if (count > 0) {
-        const originalColor = engine.pigmentField[index].pigmentData.color;
-        const originalOpacity = engine.pigmentField[index].pigmentData.opacity;
-        
-        const smoothedColor: [number, number, number] = [
-          Math.round(sumR / count),
-          Math.round(sumG / count),
-          Math.round(sumB / count)
-        ];
-        const smoothedOpacity = sumOpacity / count;
-        
-        // 根据平滑强度混合原始值和平滑值
-        tempColorBuffer[index] = [
-          Math.round(originalColor[0] * (1 - smoothingStrength) + smoothedColor[0] * smoothingStrength),
-          Math.round(originalColor[1] * (1 - smoothingStrength) + smoothedColor[1] * smoothingStrength),
-          Math.round(originalColor[2] * (1 - smoothingStrength) + smoothedColor[2] * smoothingStrength)
-        ];
-        tempOpacityBuffer[index] = originalOpacity * (1 - smoothingStrength) + smoothedOpacity * smoothingStrength;
-      }
+      // 缓存原始数据
+      const pigmentData = engine.pigmentField[index].pigmentData;
+      pixelsToProcess.push({
+        index,
+        x,
+        y,
+        distance: distanceFromCenter,
+        originalR: pigmentData.color[0],
+        originalG: pigmentData.color[1],
+        originalB: pigmentData.color[2],
+        originalOpacity: pigmentData.opacity
+      });
     }
   }
 
-  // 将平滑结果更新回原始数组
-  for (let y = top + 1; y < bottom - 1; y++) {
-    for (let x = left + 1; x < right - 1; x++) {
-      const index = y * engine.canvasWidth + x;
-      const dx = x - engine.brushCenterX;
-      const dy = y - engine.brushCenterY;
-      const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
-      
-      // 只在圆形范围内更新
-      if (distanceFromCenter <= smoothRadius && 
-          engine.pigmentField[index].isOld && 
-          tempOpacityBuffer[index] > 0.001) {
-        engine.pigmentField[index].pigmentData.color = tempColorBuffer[index];
-        engine.pigmentField[index].pigmentData.opacity = tempOpacityBuffer[index];
+  // 第二阶段：对筛选出的像素进行优化的5点十字形平滑
+  for (const pixel of pixelsToProcess) {
+    const { index, x, y, distance, originalR, originalG, originalB, originalOpacity } = pixel;
+    
+    // 计算平滑强度
+    const normalizedDistance = distance / smoothRadius;
+    const smoothingStrength = 0.3 + 0.7 * normalizedDistance;
+    
+    // 5点十字形邻域平滑：中心(2.0) + 上下左右(1.0)
+    let sumR = originalR * 2.0;
+    let sumG = originalG * 2.0;
+    let sumB = originalB * 2.0;
+    let sumOpacity = originalOpacity * 2.0;
+    let totalWeight = 2.0;
+    
+    // 上下左右4个邻居
+    const neighbors = [
+      [x, y - 1], // 上
+      [x, y + 1], // 下
+      [x - 1, y], // 左
+      [x + 1, y]  // 右
+    ];
+    
+    for (const [nx, ny] of neighbors) {
+      if (nx >= 0 && nx < engine.canvasWidth && 
+          ny >= 0 && ny < engine.canvasHeight) {
+        const nIndex = ny * engine.canvasWidth + nx;
+        
+        if (engine.pigmentField[nIndex].isOld) {
+          const nColor = engine.pigmentField[nIndex].pigmentData.color;
+          const nOpacity = engine.pigmentField[nIndex].pigmentData.opacity;
+          sumR += nColor[0];
+          sumG += nColor[1];
+          sumB += nColor[2];
+          sumOpacity += nOpacity;
+          totalWeight += 1.0;
+        } else {
+          // 空白区域使用背景色
+          sumR += 255;
+          sumG += 255;
+          sumB += 255;
+          // sumOpacity += 0; // 透明度保持不变
+          totalWeight += 1.0;
+        }
       }
     }
+    
+    // 计算平滑后的值并直接应用
+    const smoothedR = Math.round(sumR / totalWeight);
+    const smoothedG = Math.round(sumG / totalWeight);
+    const smoothedB = Math.round(sumB / totalWeight);
+    const smoothedOpacity = sumOpacity / totalWeight;
+    
+    // 混合原始值和平滑值，直接更新原始数据
+    const finalR = Math.round(originalR * (1 - smoothingStrength) + smoothedR * smoothingStrength);
+    const finalG = Math.round(originalG * (1 - smoothingStrength) + smoothedG * smoothingStrength);
+    const finalB = Math.round(originalB * (1 - smoothingStrength) + smoothedB * smoothingStrength);
+    const finalOpacity = originalOpacity * (1 - smoothingStrength) + smoothedOpacity * smoothingStrength;
+    
+    engine.pigmentField[index].pigmentData.color[0] = finalR;
+    engine.pigmentField[index].pigmentData.color[1] = finalG;
+    engine.pigmentField[index].pigmentData.color[2] = finalB;
+    engine.pigmentField[index].pigmentData.opacity = finalOpacity;
   }
 }
 
