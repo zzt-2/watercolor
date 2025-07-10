@@ -77,7 +77,7 @@
         <h3>笔刷大小</h3>
         <div class="size-control">
           <span class="size-value">{{ brushSize }}</span>
-          <input type="range" min="5" max="30" v-model.number="brushSize" />
+          <input type="range" min="1" max="30" v-model.number="brushSize" />
         </div>
       </div>
 
@@ -110,7 +110,7 @@ interface CanvasData {
   height: number;
 }
 
-const canvas = ref<CanvasData>({ width: 960, height: 540 });
+const canvas = ref<CanvasData>({ width: 1200, height: 800 });
 const pixiCanvas: Ref<HTMLCanvasElement | null> = ref(null);
 
 // 水彩引擎实例
@@ -345,8 +345,8 @@ function applyCustomColor() {
 
 .canvas-wrapper {
   width: 100%;
-  max-width: 960px;
-  height: 540px;
+  max-width: 1200px;
+  height: 800px;
   border: 1px solid #444;
   border-radius: 8px;
   overflow: hidden;

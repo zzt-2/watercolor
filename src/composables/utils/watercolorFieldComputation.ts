@@ -312,16 +312,6 @@ export function computeGradientField(engine: WatercolorEngine): void {
 export function getNewPigmentDiffusionDirections(
   engine: WatercolorEngine
 ): DiffusionDirectionsData {
-  // 创建方向数组
-  const directionX = engine.gradientFieldX; // 直接使用已计算的梯度场
-  const directionY = engine.gradientFieldY; // 直接使用已计算的梯度场
-  const distanceToCenter = new Float32Array(
-    engine.canvasWidth * engine.canvasHeight
-  );
-  const shouldDiffuse = new Uint8Array(
-    engine.canvasWidth * engine.canvasHeight
-  );
-
   // 计算区域边界
   const { left, right, top, bottom } = engine.getRegion(
     engine.brushCenterX,
@@ -329,12 +319,28 @@ export function getNewPigmentDiffusionDirections(
     engine.brushRadius
   );
 
-  // 填充数据
+  // 计算局部区域尺寸
+  const localWidth = right - left + 1;
+  const localHeight = bottom - top + 1;
+  
+  // 创建局部方向数组，只为笔刷区域分配内存
+  const distanceToCenter = new Float32Array(localWidth * localHeight);
+  const shouldDiffuse = new Uint8Array(localWidth * localHeight);
+
+  // 使用已计算的梯度场作为方向数据
+  const directionX = engine.gradientFieldX;
+  const directionY = engine.gradientFieldY;
+
+  // 填充局部数据
   for (let y = top; y <= bottom; y++) {
     for (let x = left; x <= right; x++) {
-      const index = y * engine.canvasWidth + x;
+      const globalIndex = y * engine.canvasWidth + x;
+      const localX = x - left;
+      const localY = y - top;
+      const localIndex = localY * localWidth + localX;
+      
       // 检查是否在圆内
-      if (engine.newPigmentField[index].isNew) {
+      if (engine.newPigmentField[globalIndex].isNew) {
         // 计算到中心的距离
         const dx = x - engine.brushCenterX;
         const dy = y - engine.brushCenterY;
@@ -342,18 +348,18 @@ export function getNewPigmentDiffusionDirections(
 
         // 计算到中心的距离
         const dist = Math.sqrt(distSq);
-        distanceToCenter[index] = dist;
+        distanceToCenter[localIndex] = dist;
 
         // 检查是否有有效的梯度方向
         const hasValidGradient =
-          directionX[index] !== 0 || directionY[index] !== 0;
+          directionX[globalIndex] !== 0 || directionY[globalIndex] !== 0;
 
         // 检查距离场，确保有找到最近的颜料点
-        const hasValidDistance = engine.distanceField[index] < Infinity;
+        const hasValidDistance = engine.distanceField[globalIndex] < Infinity;
 
         // 只有当有有效梯度和有效距离时才应该扩散
         if (hasValidGradient && hasValidDistance) {
-          shouldDiffuse[index] = 1;
+          shouldDiffuse[localIndex] = 1;
         }
       }
     }
@@ -364,5 +370,10 @@ export function getNewPigmentDiffusionDirections(
     directionY,
     distanceToCenter,
     shouldDiffuse,
+    // 添加区域信息以便调用者进行正确的索引转换
+    regionLeft: left,
+    regionTop: top,
+    regionWidth: localWidth,
+    regionHeight: localHeight,
   };
 }

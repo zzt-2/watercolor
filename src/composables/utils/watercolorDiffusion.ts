@@ -47,9 +47,16 @@ export function applyDirectionalDiffusion(
       const index = y * engine.canvasWidth + x;
 
       // 检查是否应该扩散
+      // 转换为局部坐标来访问directions数组
+      const localX = x - directions.regionLeft;
+      const localY = y - directions.regionTop;
+      const localIndex = localY * directions.regionWidth + localX;
+      
       if (
         !engine.newPigmentField[index].isNew ||
-        directions.shouldDiffuse[index] !== 1 ||
+        localX < 0 || localX >= directions.regionWidth ||
+        localY < 0 || localY >= directions.regionHeight ||
+        directions.shouldDiffuse[localIndex] !== 1 ||
         engine.closestPigmentX[index] === -1
       ) {
         continue;
@@ -66,8 +73,8 @@ export function applyDirectionalDiffusion(
       const distToTarget = engine.distanceField[index];
       if (distToTarget === Infinity) continue;
 
-      // 计算源点到中心的距离及比例
-      const distToCenter = directions.distanceToCenter[index];
+      // 计算源点到中心的距离及比例 - 使用局部数组
+      const distToCenter = directions.distanceToCenter[localIndex];
       const centerRatio = Math.min(1, distToCenter / engine.brushRadius);
       const baseAngle = Math.atan2(targetY - y, targetX - x);
 
@@ -97,7 +104,11 @@ export function applyDirectionalDiffusion(
       const totalDiffusionAmount =
         concentration * baseDiffusionStrength * (0.7 + 0.3 * centerRatio);
       const perPointAmount = totalDiffusionAmount / numPoints;
-      let remainingOpacity = concentration - totalDiffusionAmount;
+      
+      // 增强源点衰减：额外的源点损失因子
+      const sourceDecayFactor = 0.6 + 0.3 * centerRatio; // 中心区域衰减更强
+      const additionalSourceLoss = concentration * sourceDecayFactor * 0.4; // 额外损失40%的浓度
+      let remainingOpacity = concentration - totalDiffusionAmount - additionalSourceLoss;
 
       // 生成多个扩散点
       for (let i = 0; i < numPoints; i++) {
@@ -169,10 +180,12 @@ export function applyDirectionalDiffusion(
         }
       }
 
-      // 更新源点的剩余颜料
+      // 更新源点的剩余颜料 - 强化衰减效果
       const sourceBuffer = tempBuffer.get(index);
       if (sourceBuffer) {
-        sourceBuffer.pigmentData.opacity = Math.max(0, remainingOpacity);
+        // 确保源点衰减到合理范围，最多保留原始浓度的30%
+        const maxRetainedOpacity = concentration * 0.3;
+        sourceBuffer.pigmentData.opacity = Math.max(0, Math.min(maxRetainedOpacity, remainingOpacity));
       }
     }
   }
@@ -372,7 +385,7 @@ export function updatePigmentField(engine: WatercolorEngine): void {
         const brushHSL = RGB2HSL(engine.brush.color[0], engine.brush.color[1], engine.brush.color[2]);
         
         // 保持色相和饱和度的混色效果，只保护亮度
-        const lightnessProtectionRatio = 0.1; // 30%保持原始亮度
+        const lightnessProtectionRatio = 0.2; // 30%保持原始亮度
         const protectedL = fieldHSL.l * (1 - lightnessProtectionRatio) + brushHSL.l * lightnessProtectionRatio;
         
         // 确保亮度不会低于原始笔刷亮度的80%

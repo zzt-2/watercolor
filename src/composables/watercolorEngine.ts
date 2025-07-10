@@ -439,7 +439,7 @@ class WatercolorEngine {
     if (!point) return false;
     
     // 处理这个点
-    console.log("processSinglePendingPoint", point.x, point.y);
+    // console.log("processSinglePendingPoint", point.x, point.y);
     this.processNewPigmentAddition(point.x, point.y, this.brush.size);
     this.updateDragDirection(point.x, point.y);
     

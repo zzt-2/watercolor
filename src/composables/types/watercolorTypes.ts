@@ -25,4 +25,9 @@ export interface DiffusionDirectionsData {
   directionY: Float32Array;
   distanceToCenter: Float32Array;
   shouldDiffuse: Uint8Array;
+  // 添加区域信息以便调用者进行正确的索引转换
+  regionLeft: number;
+  regionTop: number;
+  regionWidth: number;
+  regionHeight: number;
 }
