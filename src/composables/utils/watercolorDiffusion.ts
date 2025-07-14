@@ -1,226 +1,23 @@
 import { WatercolorEngine } from "../watercolorEngine";
-import { DiffusionDirectionsData } from "../types/watercolorTypes";
-import {
-  maxDiffusionDistanceFactor,
-  UpdateRadius,
-} from "../constants/watercolorConstants";
-import { computeDistance } from "./watercolorFieldComputation";
+import { UpdateRadius } from "../constants/watercolorConstants";
 import { RGB2HSL, HSL2RGB } from "../../Utils/colorConvert";
 import mixbox from "mixbox";
-
-/**
- * 应用方向性扩散 (多点扩散版本)
- */
-export function applyDirectionalDiffusion(
-  engine: WatercolorEngine,
-  directions: DiffusionDirectionsData
-): void {
-  const { left, right, top, bottom } = engine.getRegion(
-    engine.brushCenterX,
-    engine.brushCenterY,
-    engine.brushRadius
-  );
-
-  // 创建局部临时缓冲区（性能优化：只为需要的区域分配内存）
-  const tempBuffer = new Map<number, {
-    isNew: boolean;
-    pigmentData: {
-      color: [number, number, number];
-      opacity: number;
-    };
-    edgeIntensity: number;
-  }>();
-
-  // 复制现有数据到临时缓冲区
-  for (let y = top; y <= bottom; y++) {
-    for (let x = left; x <= right; x++) {
-      const index = y * engine.canvasWidth + x;
-      if (engine.newPigmentField[index].isNew) {
-        tempBuffer.set(index, { ...engine.newPigmentField[index] });
-      }
-    }
-  }
-
-  // 对新添加的颜料区域应用扩散
-  for (let y = top; y <= bottom; y++) {
-    for (let x = left; x <= right; x++) {
-      const index = y * engine.canvasWidth + x;
-
-      // 检查是否应该扩散
-      // 转换为局部坐标来访问directions数组
-      const localX = x - directions.regionLeft;
-      const localY = y - directions.regionTop;
-      const localIndex = localY * directions.regionWidth + localX;
-      
-      if (
-        !engine.newPigmentField[index].isNew ||
-        localX < 0 || localX >= directions.regionWidth ||
-        localY < 0 || localY >= directions.regionHeight ||
-        directions.shouldDiffuse[localIndex] !== 1 ||
-        engine.closestPigmentX[index] === -1
-      ) {
-        continue;
-      }
-
-      // 获取基础扩散方向
-      const baseDirectionX = directions.directionX[index];
-      const baseDirectionY = directions.directionY[index];
-      if (baseDirectionX === 0 && baseDirectionY === 0) continue;
-
-      // 计算扩散参数
-      const targetX = engine.closestPigmentX[index];
-      const targetY = engine.closestPigmentY[index];
-      const distToTarget = engine.distanceField[index];
-      if (distToTarget === Infinity) continue;
-
-      // 计算源点到中心的距离及比例 - 使用局部数组
-      const distToCenter = directions.distanceToCenter[localIndex];
-      const centerRatio = Math.min(1, distToCenter / engine.brushRadius);
-      const baseAngle = Math.atan2(targetY - y, targetX - x);
-
-      // 获取颜料浓度
-      const concentration = engine.newPigmentField[index].pigmentData.opacity;
-      if (concentration < 0.01) continue;
-
-      // 计算扩散距离和强度
-      const maxTheoricalDistance = Math.min(
-        distToTarget * 0.8,
-        engine.brushRadius * maxDiffusionDistanceFactor
-      );
-      const distanceRatio = Math.min(1, distToTarget / maxTheoricalDistance);
-      const inverseDistanceFactor = engine.pigmentField[index].isOld
-        ? 1
-        : Math.pow(1 - distanceRatio, 1.5);
-
-      const maxAllowedDistance = maxTheoricalDistance * inverseDistanceFactor;
-      if (maxAllowedDistance < 1) continue;
-
-      // 确定扩散点数和扩散强度
-      const numPoints = Math.max(
-        2,
-        Math.round(2 + 3 * Math.pow(centerRatio, 1.5))
-      );
-      const baseDiffusionStrength = 0.3 + 0.5 * inverseDistanceFactor;
-      const totalDiffusionAmount =
-        concentration * baseDiffusionStrength * (0.7 + 0.3 * centerRatio);
-      const perPointAmount = totalDiffusionAmount / numPoints;
-      
-      // 增强源点衰减：额外的源点损失因子
-      const sourceDecayFactor = 0.6 + 0.3 * centerRatio; // 中心区域衰减更强
-      const additionalSourceLoss = concentration * sourceDecayFactor * 0.4; // 额外损失40%的浓度
-      let remainingOpacity = concentration - totalDiffusionAmount - additionalSourceLoss;
-
-      // 生成多个扩散点
-      for (let i = 0; i < numPoints; i++) {
-        // 计算随机角度和距离
-        const angleVariation = (3 * Math.PI) / 180;
-        const randomAngle =
-          baseAngle + (Math.random() * 2 - 1) * angleVariation;
-        const distanceVariation = 0.7 + Math.random() * 0.3;
-        const diffusionDistance = maxAllowedDistance * distanceVariation;
-
-        // 计算目标位置
-        const dirX = Math.cos(randomAngle);
-        const dirY = Math.sin(randomAngle);
-        const diffusionX = Math.round(x + dirX * diffusionDistance);
-        const diffusionY = Math.round(y + dirY * diffusionDistance);
-
-        // 检查位置是否有效
-        if (
-          diffusionX < 0 ||
-          diffusionX >= engine.canvasWidth ||
-          diffusionY < 0 ||
-          diffusionY >= engine.canvasHeight
-        ) {
-          continue;
-        }
-
-        // 检查是否远离中心
-        const diffusionToCenterX = engine.brushCenterX - diffusionX;
-        const diffusionToCenterY = engine.brushCenterY - diffusionY;
-        const diffDistToCenter = Math.sqrt(
-          diffusionToCenterX * diffusionToCenterX +
-            diffusionToCenterY * diffusionToCenterY
-        );
-        if (diffDistToCenter > distToCenter * 1.5 && centerRatio > 0.7) {
-          continue;
-        }
-
-        // 更新扩散点
-        const targetIndex = diffusionY * engine.canvasWidth + diffusionX;
-        const diffusionAmount = perPointAmount * (1 - (i / numPoints) * 0.3);
-
-        const existingBuffer = tempBuffer.get(targetIndex);
-        if (!existingBuffer || !existingBuffer.isNew) {
-          tempBuffer.set(targetIndex, {
-            isNew: true,
-            pigmentData: {
-              color: [...engine.newPigmentField[index].pigmentData.color],
-              opacity: diffusionAmount,
-            },
-            edgeIntensity: 0,
-          });
-        } else {
-          // 混合颜色
-          const currentColor = existingBuffer.pigmentData.color;
-          const newColor = engine.newPigmentField[index].pigmentData.color;
-          const currentOpacity = existingBuffer.pigmentData.opacity;
-
-          existingBuffer.pigmentData.color = currentColor.map((c: number, i: number) =>
-            Math.round(
-              (c * currentOpacity + newColor[i] * diffusionAmount) /
-                (currentOpacity + diffusionAmount)
-            )
-          ) as [number, number, number];
-
-          existingBuffer.pigmentData.opacity = Math.min(
-            1,
-            currentOpacity + diffusionAmount
-          );
-        }
-      }
-
-      // 更新源点的剩余颜料 - 强化衰减效果
-      const sourceBuffer = tempBuffer.get(index);
-      if (sourceBuffer) {
-        // 确保源点衰减到合理范围，最多保留原始浓度的30%
-        const maxRetainedOpacity = concentration * 0.3;
-        sourceBuffer.pigmentData.opacity = Math.max(0, Math.min(maxRetainedOpacity, remainingOpacity));
-      }
-    }
-  }
-
-  // 将临时缓冲区数据复制回原始数组，增加范围以包含所有扩散点
-  const expandedRange = engine.brushRadius * 1.5; // 扩散扩展范围
-  for (let y = top - expandedRange; y <= bottom + expandedRange; y++) {
-    for (let x = left - expandedRange; x <= right + expandedRange; x++) {
-      if (
-        x >= 0 &&
-        x < engine.canvasWidth &&
-        y >= 0 &&
-        y < engine.canvasHeight
-      ) {
-        const index = y * engine.canvasWidth + x;
-        const bufferData = tempBuffer.get(index);
-        if (bufferData && bufferData.isNew) {
-          engine.newPigmentField[index] = {
-            isNew: true,
-            pigmentData: {
-              color: [...bufferData.pigmentData.color] as [number, number, number],
-              opacity: bufferData.pigmentData.opacity,
-            },
-            edgeIntensity: 0,
-          };
-        }
-      }
-    }
-  }
-}
+// PERF_TIMER - 导入性能计时工具
+import { startTimer, endTimer } from "./performanceTimer";
+import {
+  stepDiffusionHistoryDepthFactor,
+  stepWetAreaRadiusFactor,
+  stepFieldSpecialValue,
+  stepDiffusionThresholdFactor,
+} from "../constants/watercolorConstants";
 
 /**
  * 更新颜料场
  */
 export function updatePigmentField(engine: WatercolorEngine): void {
+  // PERF_TIMER_START - 颜料场更新计时
+  const timer = startTimer('updatePigmentField');
+  
   const { left, right, top, bottom } = engine.getRegion(
     engine.brushCenterX,
     engine.brushCenterY,
@@ -403,4 +200,282 @@ export function updatePigmentField(engine: WatercolorEngine): void {
       }
     }
   }
+  
+  // PERF_TIMER_END - 颜料场更新计时结束
+  endTimer(timer);
+}
+
+/**
+ * 环形区域扩散函数 - 测试版本
+ * 对笔刷半径的0.8到1.0倍环形区域进行扩散
+ * 任何时候都会扩散，用于测试新扩散方法的效果
+ */
+export function applyRingAreaDiffusion(engine: WatercolorEngine): void {
+  // PERF_TIMER_START - 环形扩散计时
+  const timer = startTimer('applyRingAreaDiffusion');
+  
+  const brushRadius = engine.brushRadius;
+  const innerRadius = brushRadius * 0.9;  // 内环半径
+  const outerRadius = brushRadius * 1.0;  // 外环半径
+  
+  const { left, right, top, bottom } = engine.getRegion(
+    engine.brushCenterX,
+    engine.brushCenterY,
+    outerRadius
+  );
+
+  // 创建临时缓冲区存储扩散结果
+  const tempBuffer = new Map<number, {
+    isNew: boolean;
+    pigmentData: {
+      color: [number, number, number];
+      opacity: number;
+    };
+    edgeIntensity: number;
+  }>();
+
+  // 复制现有数据到临时缓冲区
+  for (let y = top; y <= bottom; y++) {
+    for (let x = left; x <= right; x++) {
+      const index = y * engine.canvasWidth + x;
+      if (engine.newPigmentField[index].isNew) {
+        tempBuffer.set(index, { ...engine.newPigmentField[index] });
+      }
+    }
+  }
+
+  // 计算步数条件检查参数
+  const stepThreshold = Math.ceil(brushRadius * stepDiffusionThresholdFactor);
+
+  // 遍历环形区域，对每个有颜料的像素进行扩散
+  for (let y = top; y <= bottom; y++) {
+    for (let x = left; x <= right; x++) {
+      const index = y * engine.canvasWidth + x;
+
+      // 计算到笔刷中心的距离
+      const dx = x - engine.brushCenterX;
+      const dy = y - engine.brushCenterY;
+      const distanceToCenter = Math.sqrt(dx * dx + dy * dy);
+
+      // 检查是否在环形区域内
+      if (distanceToCenter < innerRadius || distanceToCenter > outerRadius) {
+        continue;
+      }
+
+      // 检查步数条件：步数差大于阈值或值为特定值
+      const stepValue = engine.stepField[index];
+      const stepDiff = engine.currentStepCount - stepValue;
+      console.log(stepDiff, stepThreshold, stepValue);
+      if (!(stepDiff > stepThreshold || stepValue === stepFieldSpecialValue) || stepValue === 0) {
+        continue;
+      }
+
+      // 检查是否有颜料
+      if (!engine.newPigmentField[index].isNew) {
+        continue;
+      }
+
+      const concentration = engine.newPigmentField[index].pigmentData.opacity;
+      if (concentration < 0.01) continue;
+
+      // 计算扩散强度（环形区域中央扩散更强）
+      const ringPosition = (distanceToCenter - innerRadius) / (outerRadius - innerRadius);
+      const ringCenter = 0.5; // 环形中央位置
+      const distanceFromRingCenter = Math.abs(ringPosition - ringCenter);
+      const diffusionStrength = (1 - distanceFromRingCenter * 2) * 0.4; // 中央强度0.4，边缘强度0.0
+
+      if (diffusionStrength <= 0) continue;
+
+      // 扩散参数 - 增加扩散距离
+      const maxDiffusionDistance = brushRadius * 0.4; // 扩散距离从0.3增加到0.8
+      const numDiffusionPoints = 8; // 扩散点数从6增加到8
+      const totalDiffusionAmount = concentration * diffusionStrength;
+      const perPointAmount = totalDiffusionAmount / numDiffusionPoints;
+
+      // 生成多个扩散点
+      for (let i = 0; i < numDiffusionPoints; i++) {
+        // 计算扩散角度（均匀分布 + 随机偏移）
+        const baseAngle = (i / numDiffusionPoints) * 2 * Math.PI;
+        const randomOffset = (Math.random() - 0.5) * (Math.PI / 6); // ±30度随机偏移
+        const diffusionAngle = baseAngle + randomOffset;
+
+        // 计算扩散距离（随机变化）
+        const distanceVariation = 0.7 + Math.random() * 0.6; // 0.7 到 1.3 倍
+        const diffusionDistance = maxDiffusionDistance * distanceVariation;
+
+        // 计算目标位置
+        const dirX = Math.cos(diffusionAngle);
+        const dirY = Math.sin(diffusionAngle);
+        const targetX = Math.round(x + dirX * diffusionDistance);
+        const targetY = Math.round(y + dirY * diffusionDistance);
+
+        // 检查目标位置是否有效
+        if (
+          targetX < 0 ||
+          targetX >= engine.canvasWidth ||
+          targetY < 0 ||
+          targetY >= engine.canvasHeight
+        ) {
+          continue;
+        }
+
+        const targetIndex = targetY * engine.canvasWidth + targetX;
+        const diffusionAmount = perPointAmount * (0.8 + Math.random() * 0.4); // 80%-120%变化
+
+        // 更新扩散点
+        const existingBuffer = tempBuffer.get(targetIndex);
+        if (!existingBuffer || !existingBuffer.isNew) {
+          tempBuffer.set(targetIndex, {
+            isNew: true,
+            pigmentData: {
+              color: [...engine.newPigmentField[index].pigmentData.color],
+              opacity: diffusionAmount,
+            },
+            edgeIntensity: 0,
+          });
+        } else {
+          // 混合颜色（简单的透明度加权平均）
+          const currentColor = existingBuffer.pigmentData.color;
+          const newColor = engine.newPigmentField[index].pigmentData.color;
+          const currentOpacity = existingBuffer.pigmentData.opacity;
+
+          existingBuffer.pigmentData.color = currentColor.map((c: number, i: number) =>
+            Math.round(
+              (c * currentOpacity + newColor[i] * diffusionAmount) /
+                (currentOpacity + diffusionAmount)
+            )
+          ) as [number, number, number];
+
+          existingBuffer.pigmentData.opacity = Math.min(
+            1,
+            currentOpacity + diffusionAmount
+          );
+        }
+      }
+
+      // 减少源点颜料（模拟颜料扩散出去）
+      const sourceBuffer = tempBuffer.get(index);
+      if (sourceBuffer) {
+        const retentionRatio = 0.7; // 保留70%的颜料
+        sourceBuffer.pigmentData.opacity = Math.max(
+          0,
+          concentration * retentionRatio
+        );
+      }
+    }
+  }
+
+  // 将扩散结果应用到引擎
+  const expandedRange = Math.ceil(outerRadius + brushRadius * 0.8); // 考虑扩散距离
+  for (let y = top - expandedRange; y <= bottom + expandedRange; y++) {
+    for (let x = left - expandedRange; x <= right + expandedRange; x++) {
+      if (
+        x >= 0 &&
+        x < engine.canvasWidth &&
+        y >= 0 &&
+        y < engine.canvasHeight
+      ) {
+        const index = y * engine.canvasWidth + x;
+        const bufferData = tempBuffer.get(index);
+        if (bufferData && bufferData.isNew) {
+          engine.newPigmentField[index] = {
+            isNew: true,
+            pigmentData: {
+              color: [...bufferData.pigmentData.color] as [number, number, number],
+              opacity: bufferData.pigmentData.opacity,
+            },
+            edgeIntensity: 0,
+          };
+        }
+      }
+    }
+  }
+  
+  // PERF_TIMER_END - 环形扩散计时结束
+  endTimer(timer);
+}
+
+/**
+ * 更新基于步数的湿区系统
+ */
+export function updateStepBasedWetArea(
+  engine: WatercolorEngine,
+  centerX: number,
+  centerY: number,
+  radius: number
+): void {
+  // 添加当前坐标到历史记录
+  engine.coordinateHistory.push({ x: centerX, y: centerY });
+  engine.currentStepCount++;
+
+  // 维护历史记录的固定长度
+  const maxHistoryLength = Math.ceil(radius * stepDiffusionHistoryDepthFactor);
+  if (engine.coordinateHistory.length > maxHistoryLength) {
+    engine.coordinateHistory.shift(); // 移除最旧的坐标
+  }
+
+  // 检查历史数组最后一位（延迟位置）是否存在数据
+  const delayIndex = engine.coordinateHistory.length - maxHistoryLength;
+  if (delayIndex >= 0 && engine.coordinateHistory[delayIndex]) {
+    const delayCoord = engine.coordinateHistory[delayIndex];
+    writeStepNumbers(engine, delayCoord.x, delayCoord.y, radius);
+  }
+}
+
+/**
+ * 为指定坐标周围的湿区写入步数
+ */
+function writeStepNumbers(
+  engine: WatercolorEngine,
+  centerX: number,
+  centerY: number,
+  radius: number
+): void {
+  const wetRadius = radius * stepWetAreaRadiusFactor;
+  const { left, right, top, bottom } = engine.getRegion(centerX, centerY, wetRadius);
+
+  for (let y = top; y <= bottom; y++) {
+    for (let x = left; x <= right; x++) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const distSq = dx * dx + dy * dy;
+
+      if (distSq <= wetRadius * wetRadius) {
+        const index = y * engine.canvasWidth + x;
+        // 只为值不为特定值的点写入步数
+        if (engine.stepField[index] !== stepFieldSpecialValue) {
+          engine.stepField[index] = engine.currentStepCount;
+        }
+      }
+    }
+  }
+}
+
+
+
+
+
+/**
+ * 重置步数字段（松开时调用）
+ */
+export function resetStepField(
+  engine: WatercolorEngine,
+  centerX: number,
+  centerY: number,
+  radius: number
+): void {
+  // 处理剩余的历史坐标
+  for (const coord of engine.coordinateHistory) {
+    writeStepNumbers(engine, coord.x, coord.y, radius);
+  }
+
+  engine.stepField.forEach((value, index) => {
+    if (value !== stepFieldSpecialValue && value !== 0) {
+      engine.stepField[index] = stepFieldSpecialValue;
+    }
+  });
+
+  // 清空历史坐标数组
+  engine.coordinateHistory = [];
+  engine.currentStepCount = 0;
 }

@@ -7,6 +7,8 @@ import {
   UpdateRadius,
   maxWetValue,
 } from "../constants/watercolorConstants";
+// PERF_TIMER - 导入性能计时工具
+import { startTimer, endTimer } from "./performanceTimer";
 
 /**
  * 设置均匀分布的颜料和湿区
@@ -17,6 +19,9 @@ export function setUniformPigmentDistribution(
   centerY: number,
   radius: number
 ): void {
+  // PERF_TIMER_START - 初始颜料分布设置计时
+  const timer = startTimer('setUniformPigmentDistribution');
+  
   const { left, right, top, bottom } = engine.getRegion(
     centerX,
     centerY,
@@ -115,6 +120,9 @@ export function setUniformPigmentDistribution(
   }
 
   engine.calculateWetAreaEdges();
+  
+  // PERF_TIMER_END - 初始颜料分布设置计时结束
+  endTimer(timer);
 }
 
 /**
@@ -156,224 +164,4 @@ export function setInitialPigmentPositions(engine: WatercolorEngine): void {
       }
     }
   }
-}
-
-/**
- * 计算距离场
- */
-export function computeDistanceField(engine: WatercolorEngine): void {
-  // 如果没有已有颜料点，则无需计算
-  if (engine.existingPigmentPoints.length === 0) {
-    return;
-  }
-
-  const { left, right, top, bottom } = engine.getRegion(
-    engine.brushCenterX,
-    engine.brushCenterY,
-    engine.brushRadius
-  );
-
-  // 预先计算和存储已有颜料点到笔刷中心的距离，避免重复计算
-  const pigmentDistances = engine.existingPigmentPoints.map((point) => {
-    const dx = point.x - engine.brushCenterX;
-    const dy = point.y - engine.brushCenterY;
-    const distToCenter = Math.sqrt(dx * dx + dy * dy);
-    return {
-      x: point.x,
-      y: point.y,
-      distToCenter: distToCenter,
-    };
-  });
-
-  // 遍历所有新添加的颜料区域像素
-  for (let y = top; y <= bottom; y++) {
-    for (let x = left; x <= right; x++) {
-      const index = y * engine.canvasWidth + x;
-
-      // 只处理新添加的颜料区域
-      if (!engine.newPigmentField[index].isNew) {
-        continue;
-      }
-
-      // 计算该点到笔刷中心的距离
-      const dx = x - engine.brushCenterX;
-      const dy = y - engine.brushCenterY;
-      const pixelDistToCenter = Math.sqrt(dx * dx + dy * dy);
-
-      // 筛选符合条件的旧颜料点
-      const eligiblePigments = pigmentDistances.filter((pigment) => {
-        // 确保旧颜料点离圆心的距离大于当前像素
-        if (pigment.distToCenter <= pixelDistToCenter) {
-          return false;
-        }
-
-        // 快速排除：使用曼哈顿距离进行初步筛选
-        const absDx = Math.abs(x - pigment.x);
-        const absDy = Math.abs(y - pigment.y);
-        if (absDx + absDy > engine.brushRadius * (UpdateRadius - 1)) {
-          return false;
-        }
-
-        // 计算实际欧几里得距离
-        const dist = computeDistance(x, y, pigment.x, pigment.y);
-        return dist <= engine.brushRadius * (UpdateRadius - 1);
-      });
-
-      // 如果找到了符合条件的旧颜料点
-      if (eligiblePigments.length > 0) {
-        // 随机选择一个作为扩散目标
-        const randomIndex = Math.floor(Math.random() * eligiblePigments.length);
-        const targetPigment = eligiblePigments[randomIndex];
-
-        // 计算到目标点的距离
-        const dist = computeDistance(x, y, targetPigment.x, targetPigment.y);
-
-        // 更新距离场和最近点信息
-        engine.distanceField[index] = dist;
-        engine.closestPigmentX[index] = targetPigment.x;
-        engine.closestPigmentY[index] = targetPigment.y;
-      } else {
-        // 如果没有找到合适的点，设置一个默认值
-        engine.distanceField[index] = Infinity;
-        engine.closestPigmentX[index] = -1;
-        engine.closestPigmentY[index] = -1;
-      }
-    }
-  }
-}
-
-/**
- * 计算两点之间的欧几里得距离
- */
-export function computeDistance(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number
-): number {
-  const dx = x1 - x2;
-  const dy = y1 - y2;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-/**
- * 计算梯度场
- */
-export function computeGradientField(engine: WatercolorEngine): void {
-  const { left, right, top, bottom } = engine.getRegion(
-    engine.brushCenterX,
-    engine.brushCenterY,
-    engine.brushRadius
-  );
-
-  for (let y = top; y <= bottom; y++) {
-    for (let x = left; x <= right; x++) {
-      const index = y * engine.canvasWidth + x;
-
-      // 只计算新添加颜料区域的梯度
-      if (engine.newPigmentField[index].isNew) {
-        const nearestX = engine.closestPigmentX[index];
-        const nearestY = engine.closestPigmentY[index];
-
-        // 如果存在最近颜料点
-        if (nearestX !== -1) {
-          // 计算方向向量
-          const dx = nearestX - x;
-          const dy = nearestY - y;
-          const dist = engine.distanceField[index];
-          // 标准化方向向量
-          if (dist > 0) {
-            // 基础梯度方向
-            const normalizedDx = dx / dist;
-            const normalizedDy = dy / dist;
-
-            // 应用旋转 (使用二维旋转矩阵)
-            engine.gradientFieldX[index] = normalizedDx;
-            engine.gradientFieldY[index] = normalizedDy;
-          } else {
-            // 如果距离为0，设置为随机方向
-            const angle = Math.random() * 2 * Math.PI;
-            engine.gradientFieldX[index] = Math.cos(angle);
-            engine.gradientFieldY[index] = Math.sin(angle);
-          }
-        } else {
-          // 没有找到最近颜料，设置为0
-          engine.gradientFieldX[index] = 0;
-          engine.gradientFieldY[index] = 0;
-        }
-      }
-    }
-  }
-}
-
-/**
- * 获取新添加颜料区域的扩散方向
- */
-export function getNewPigmentDiffusionDirections(
-  engine: WatercolorEngine
-): DiffusionDirectionsData {
-  // 计算区域边界
-  const { left, right, top, bottom } = engine.getRegion(
-    engine.brushCenterX,
-    engine.brushCenterY,
-    engine.brushRadius
-  );
-
-  // 计算局部区域尺寸
-  const localWidth = right - left + 1;
-  const localHeight = bottom - top + 1;
-  
-  // 创建局部方向数组，只为笔刷区域分配内存
-  const distanceToCenter = new Float32Array(localWidth * localHeight);
-  const shouldDiffuse = new Uint8Array(localWidth * localHeight);
-
-  // 使用已计算的梯度场作为方向数据
-  const directionX = engine.gradientFieldX;
-  const directionY = engine.gradientFieldY;
-
-  // 填充局部数据
-  for (let y = top; y <= bottom; y++) {
-    for (let x = left; x <= right; x++) {
-      const globalIndex = y * engine.canvasWidth + x;
-      const localX = x - left;
-      const localY = y - top;
-      const localIndex = localY * localWidth + localX;
-      
-      // 检查是否在圆内
-      if (engine.newPigmentField[globalIndex].isNew) {
-        // 计算到中心的距离
-        const dx = x - engine.brushCenterX;
-        const dy = y - engine.brushCenterY;
-        const distSq = dx * dx + dy * dy;
-
-        // 计算到中心的距离
-        const dist = Math.sqrt(distSq);
-        distanceToCenter[localIndex] = dist;
-
-        // 检查是否有有效的梯度方向
-        const hasValidGradient =
-          directionX[globalIndex] !== 0 || directionY[globalIndex] !== 0;
-
-        // 检查距离场，确保有找到最近的颜料点
-        const hasValidDistance = engine.distanceField[globalIndex] < Infinity;
-
-        // 只有当有有效梯度和有效距离时才应该扩散
-        if (hasValidGradient && hasValidDistance) {
-          shouldDiffuse[localIndex] = 1;
-        }
-      }
-    }
-  }
-
-  return {
-    directionX,
-    directionY,
-    distanceToCenter,
-    shouldDiffuse,
-    // 添加区域信息以便调用者进行正确的索引转换
-    regionLeft: left,
-    regionTop: top,
-    regionWidth: localWidth,
-    regionHeight: localHeight,
-  };
 }

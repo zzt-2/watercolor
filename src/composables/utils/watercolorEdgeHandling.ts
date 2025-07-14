@@ -1,6 +1,8 @@
 import { WatercolorEngine } from "../watercolorEngine";
 import mixbox from "mixbox";
 import { RGB2HSL, HSL2RGB } from "../../Utils/colorConvert";
+// PERF_TIMER - 导入性能计时工具
+import { startTimer, endTimer } from "./performanceTimer";
 
 /**
  * 计算累积阻力因子 - 越接近最大值，越难累积
@@ -105,7 +107,7 @@ function injectTriggerIntensity(
   
   // 增强注入强度，让内圈有足够的扩散动力
   const injectionStrength = baseIntensity * 0.2;
-  console.log(centerX, centerY, injectionStrength);
+  // console.log(centerX, centerY, injectionStrength);
   
   // 累积到临时层，限制最大值
   const currentValue = engine.thirdLayerTempField[tempIndex];
@@ -160,7 +162,7 @@ function applyDynamicDecay(engine: WatercolorEngine, diffusionMask: Float32Array
           
           
           engine.thirdLayerTempField[tempIndex] *= decayFactor;
-          console.log(engine.thirdLayerTempField[tempIndex]);
+          // console.log(engine.thirdLayerTempField[tempIndex]);
           
           // 降低清除阈值，但保留更多弱值
           if (engine.thirdLayerTempField[tempIndex] < 0.00005) { // 从0.0001降到0.00005
@@ -605,6 +607,9 @@ function clearThirdLayerPersistentField(engine: WatercolorEngine, centerX: numbe
  * 使用Sobel算子计算湿区的边缘强度 - 三层边缘实现
  */
 export function calculateWetAreaEdges(engine: WatercolorEngine): void {
+  // PERF_TIMER_START - 边缘计算计时
+  const timer = startTimer('calculateWetAreaEdges');
+  
   // 减小边缘检测范围，避免远处旧边缘被激活
   const wetRadius =
     engine.brushRadius * Math.min(engine.edgeDetectionRadiusFactor, 2.0);
@@ -815,7 +820,7 @@ export function calculateWetAreaEdges(engine: WatercolorEngine): void {
               maxSecondLayer,
               secondLayerIntensity
             );
-            console.log(x,y,engine.secondLayerEdgeField[index]);
+            // console.log(x,y,engine.secondLayerEdgeField[index]);
           }
         }
       }
@@ -827,25 +832,29 @@ export function calculateWetAreaEdges(engine: WatercolorEngine): void {
   // 处理第三层边缘扩散
     const triggers = detectEdgeDiffusionTriggers(engine);
     processThirdLayerEdgeDiffusion(engine, triggers);
+    
+    // PERF_TIMER_END - 边缘计算计时结束
+    endTimer(timer);
 }
 
 /**
  * 对最终颜料场进行圆形渐变平滑处理，消除扩散产生的锯齿 - 优化版本
  */
 function applyFinalPigmentSmoothing(engine: WatercolorEngine): void {
-  const smoothRadius = engine.brushRadius * 1.9;
+  const smoothRadius = engine.brushRadius * 1.8 ;
   const { left, right, top, bottom } = engine.getRegion(
     engine.brushCenterX,
     engine.brushCenterY,
     smoothRadius
   );
 
+  const smoothRadiusSq = smoothRadius * smoothRadius;
+
   // 预筛选需要处理的像素，避免全画布遍历
   const pixelsToProcess: Array<{
     index: number;
     x: number;
     y: number;
-    distance: number;
     originalR: number;
     originalG: number;
     originalB: number;
@@ -858,14 +867,14 @@ function applyFinalPigmentSmoothing(engine: WatercolorEngine): void {
       const index = y * engine.canvasWidth + x;
       
       // 只处理有颜料的像素
-      if (!engine.pigmentField[index].isOld) continue;
+      // if (!engine.pigmentField[index].isOld) continue;
       
       const dx = x - engine.brushCenterX;
       const dy = y - engine.brushCenterY;
-      const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+      const distanceFromCenter = dx * dx + dy * dy;
       
       // 只在圆形范围内进行平滑
-      if (distanceFromCenter > smoothRadius) continue;
+      if (distanceFromCenter > smoothRadiusSq) continue;
       
       // 缓存原始数据
       const pigmentData = engine.pigmentField[index].pigmentData;
@@ -873,7 +882,6 @@ function applyFinalPigmentSmoothing(engine: WatercolorEngine): void {
         index,
         x,
         y,
-        distance: distanceFromCenter,
         originalR: pigmentData.color[0],
         originalG: pigmentData.color[1],
         originalB: pigmentData.color[2],
@@ -884,7 +892,7 @@ function applyFinalPigmentSmoothing(engine: WatercolorEngine): void {
 
   // 第二阶段：对筛选出的像素进行优化的5点十字形平滑
   for (const pixel of pixelsToProcess) {
-    const { index, x, y, distance, originalR, originalG, originalB, originalOpacity } = pixel;
+    const { index, x, y, originalR, originalG, originalB, originalOpacity } = pixel;
     
     // 计算平滑强度
     // const normalizedDistance = distance / smoothRadius;
@@ -944,7 +952,20 @@ function applyFinalPigmentSmoothing(engine: WatercolorEngine): void {
 /**
  * 渲染到画布 - 应用边缘增强效果
  */
+// PERF_OPTIMIZATION - 高效的RGB颜色线性插值，替代mixbox.lerp
+function fastColorLerp(color1: number[], color2: number[], t: number): [number, number, number] {
+  const invT = 1 - t;
+  return [
+    Math.round(color1[0] * invT + color2[0] * t),
+    Math.round(color1[1] * invT + color2[1] * t),
+    Math.round(color1[2] * invT + color2[2] * t)
+  ];
+}
+
 export function render(engine: WatercolorEngine): void {
+  // PERF_TIMER_START - 渲染计时
+  const timer = startTimer('render');
+  
   // 在渲染前对最终颜料场进行平滑
   applyFinalPigmentSmoothing(engine);
   
@@ -955,52 +976,62 @@ export function render(engine: WatercolorEngine): void {
     engine.brushRadius * engine.UpdateRadius
   );
 
+  // PERF_OPTIMIZATION - 预计算常用值，减少重复计算
+  const pixels = engine.p5Instance.pixels;
+  const pigmentField = engine.pigmentField;
+  const primitiveColorField = engine.primitiveColorField;
+  const firstLayerEdgeField = engine.firstLayerEdgeField;
+  const secondLayerEdgeField = engine.secondLayerEdgeField;
+  const thirdLayerPersistentField = engine.thirdLayerPersistentField;
+  const canvasWidth = engine.canvasWidth;
+
   for (let x = left; x <= right; x++) {
     for (let y = top; y <= bottom; y++) {
-      const index = x + y * engine.canvasWidth;
+      const index = x + y * canvasWidth;
       const pix = index * 4;
 
       // // // 测试模式：如果测试层有值，直接显示白色
       // if (engine.debugTestLayer[index] > 0.1) {
-      //   engine.p5Instance.pixels[pix] = 255;     // R
-      //   engine.p5Instance.pixels[pix + 1] = 255; // G  
-      //   engine.p5Instance.pixels[pix + 2] = 255; // B
-      //   engine.p5Instance.pixels[pix + 3] = 255; // A
+      //   pixels[pix] = 255;     // R
+      //   pixels[pix + 1] = 255; // G  
+      //   pixels[pix + 2] = 255; // B
+      //   pixels[pix + 3] = 255; // A
       //   continue; // 跳过正常渲染
       // }
 
+      // PERF_OPTIMIZATION - 缓存字段访问，减少重复查找
+      const pigmentData = pigmentField[index].pigmentData;
+      const primitiveData = primitiveColorField[index];
+
       // 获取基础颜色
-      const finalColor = engine.pigmentField[index].pigmentData.color;
+      const finalColor = pigmentData.color;
 
       // 检查原色层并混合
       let renderColor = finalColor;
-      if (engine.primitiveColorField[index].hasPrimitive) {
-        const primitiveColor = engine.primitiveColorField[index].pigmentData.color;
-        // 使用mixbox.lerp混合：finalColor * 0.7 + primitiveColor * 0.3
-        renderColor = mixbox.lerp(
-          `rgb(${finalColor.join(",")})`,
-          `rgb(${primitiveColor.join(",")})`,
-          0.1
-        );
+      if (primitiveData.hasPrimitive) {
+        const primitiveColor = primitiveData.pigmentData.color;
+        // PERF_OPTIMIZATION - 使用快速RGB插值替代mixbox.lerp
+        renderColor = fastColorLerp(finalColor, primitiveColor, 0.1);
       }
 
       // 直接使用原始数据（已经过平滑处理）
-      const thirdLayerValue = engine.thirdLayerPersistentField[index];
+      const thirdLayerValue = thirdLayerPersistentField[index];
 
       // 计算综合边缘效果 - 三层权重配合产生边缘效果
       const combinedEdgeEffect =
-        engine.firstLayerEdgeField[index] * 0.35 + // 全画布持久边缘
-        engine.secondLayerEdgeField[index] * 0.45 + // 笔刷局部边缘
+        firstLayerEdgeField[index] * 0.35 + // 全画布持久边缘
+        secondLayerEdgeField[index] * 0.45 + // 笔刷局部边缘
         thirdLayerValue * 1.1; // 直接使用已平滑的原始数据
         
 
       // 处理边缘效果 - 保持现有的 HSL 处理方式
       if (combinedEdgeEffect > 0.01) {
-        const { h, s, l } = RGB2HSL(
-          renderColor[0],
-          renderColor[1],
-          renderColor[2]
-        );
+        // PERF_OPTIMIZATION - 缓存颜色值，减少数组访问
+        const r = renderColor[0];
+        const g = renderColor[1];
+        const b = renderColor[2];
+        
+        const { h, s, l } = RGB2HSL(r, g, b);
 
         // 根据原亮度计算降低幅度
         const lightnessFactor = Math.pow(l, 0.5);
@@ -1009,19 +1040,22 @@ export function render(engine: WatercolorEngine): void {
         const newL = Math.max(0.2, l - lightnessReduction); // 降低最小亮度限制
 
         // 只调整亮度
-        const { r, g, b } = HSL2RGB(h, s, newL);
-        engine.p5Instance.pixels[pix] = r;
-        engine.p5Instance.pixels[pix + 1] = g;
-        engine.p5Instance.pixels[pix + 2] = b;
+        const { r: newR, g: newG, b: newB } = HSL2RGB(h, s, newL);
+        pixels[pix] = newR;
+        pixels[pix + 1] = newG;
+        pixels[pix + 2] = newB;
       } else {
-        engine.p5Instance.pixels[pix] = renderColor[0];
-        engine.p5Instance.pixels[pix + 1] = renderColor[1];
-        engine.p5Instance.pixels[pix + 2] = renderColor[2];
+        pixels[pix] = renderColor[0];
+        pixels[pix + 1] = renderColor[1];
+        pixels[pix + 2] = renderColor[2];
       }
     }
   }
 
   engine.p5Instance.updatePixels();
+  
+  // PERF_TIMER_END - 渲染计时结束
+  endTimer(timer);
 }
 
 /**

@@ -3,6 +3,12 @@ import { BrushData, PigmentData, Region } from "./types/watercolorTypes";
 import {
   UpdateRadius,
   edgeDetectionRadiusFactor,
+  stepDiffusionHistoryDepthFactor,
+  stepDiffusionThresholdFactor,
+  stepWetAreaRadiusFactor,
+  stepDiffusionInnerRadiusFactor,
+  stepDiffusionOuterRadiusFactor,
+  stepFieldSpecialValue,
 } from "./constants/watercolorConstants";
 import {
   initComplexArrays,
@@ -91,6 +97,11 @@ class WatercolorEngine {
   public isProcessingPoints: boolean = false;
   public maxQueueSize: number = 200; // 防止队列过大
 
+  // 步数扩散系统
+  public stepField: Int32Array; // 步数数组
+  public coordinateHistory: Array<{x: number, y: number}> = []; // 历史坐标
+  public currentStepCount: number = 0; // 当前步数
+
   constructor(canvasElement: HTMLCanvasElement, width: number, height: number) {
     this.canvasWidth = width;
     this.canvasHeight = height;
@@ -121,6 +132,10 @@ class WatercolorEngine {
     
     // 初始化调试测试层
     this.debugTestLayer = new Float32Array(size);
+
+    // 初始化步数扩散系统
+    this.stepField = new Int32Array(size);
+    this.stepField.fill(stepFieldSpecialValue); // 初始化为特定值
 
     const { left, right, top, bottom } = this.getRegion(
       this.brushCenterX,

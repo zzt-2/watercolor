@@ -2,15 +2,15 @@ import { WatercolorEngine } from "../watercolorEngine";
 import {
   setUniformPigmentDistribution,
   setInitialPigmentPositions,
-  computeDistanceField,
-  computeGradientField,
-  getNewPigmentDiffusionDirections,
 } from "./watercolorFieldComputation";
 import {
-  applyDirectionalDiffusion,
+  applyRingAreaDiffusion,
   updatePigmentField,
+  updateStepBasedWetArea,
 } from "./watercolorDiffusion";
 import mixbox from "mixbox";
+// PERF_TIMER - 导入性能计时工具
+import { startTimer, endTimer } from "./performanceTimer";
 
 /**
  * 综合处理新添加的颜料点
@@ -25,25 +25,29 @@ export function processNewPigmentAddition(
   centerY: number,
   radius: number
 ): void {
+  // PERF_TIMER_START - 整体处理流程计时
+  const overallTimer = startTimer('processNewPigmentAddition');
+  
   // 初始化颜料分布 - 会同时设置原色层
   setUniformPigmentDistribution(engine, centerX, centerY, radius);
 
   // 计算基础距离场，避免不必要的计算循环
   setInitialPigmentPositions(engine);
-  computeDistanceField(engine);
-  computeGradientField(engine);
 
-  // 获取扩散方向数据
-  const diffusionDirections = getNewPigmentDiffusionDirections(engine);
+  // 测试新的环形区域扩散方法
+  applyRingAreaDiffusion(engine);
 
-  // 应用方向性扩散
-  applyDirectionalDiffusion(engine, diffusionDirections);
+  // 更新基于步数的湿区系统
+  updateStepBasedWetArea(engine, centerX, centerY, radius);
 
   // 更新颜料场
   updatePigmentField(engine);
 
   // 增加笔画计数
   engine.incrementStrokeCount();
+  
+  // PERF_TIMER_END - 整体处理流程计时结束
+  endTimer(overallTimer);
 }
 
 /**

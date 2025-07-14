@@ -1,6 +1,8 @@
 import p5 from "p5";
 import { WatercolorEngine } from "../watercolorEngine";
 import { BrushData, PigmentData } from "../types/watercolorTypes";
+import { resetStepField } from "./watercolorDiffusion";
+import { stepFieldSpecialValue } from "../constants/watercolorConstants";
 
 /**
  * 初始化P5实例及与画布相关的设置
@@ -93,6 +95,9 @@ export function initP5(engine: WatercolorEngine): void {
           // 清空原色层
           engine.clearPrimitiveLayer(mouseX, mouseY, engine.brush.size);
           
+          // 重置步数字段
+          resetStepField(engine, mouseX, mouseY, engine.brush.size);
+          
           // 清空队列
           engine.clearPendingPoints();
           
@@ -145,6 +150,11 @@ export function initArrays(engine: WatercolorEngine): void {
   
   // 初始化调试测试层
   engine.debugTestLayer.fill(0);
+
+  // 初始化步数字段
+  engine.stepField.fill(0);
+  engine.coordinateHistory = [];
+  engine.currentStepCount = 0;
 }
 
 /**
