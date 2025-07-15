@@ -265,7 +265,7 @@ export function applyRingAreaDiffusion(engine: WatercolorEngine): void {
       // 检查步数条件：步数差大于阈值或值为特定值
       const stepValue = engine.stepField[index];
       const stepDiff = engine.currentStepCount - stepValue;
-      console.log(stepDiff, stepThreshold, stepValue);
+      // console.log(stepDiff, stepThreshold, stepValue);
       if (!(stepDiff > stepThreshold || stepValue === stepFieldSpecialValue) || stepValue === 0) {
         continue;
       }

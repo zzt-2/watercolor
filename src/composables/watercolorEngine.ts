@@ -95,7 +95,7 @@ class WatercolorEngine {
   // 未处理点队列系统
   public pendingPoints: Array<{x: number, y: number}> = [];
   public isProcessingPoints: boolean = false;
-  public maxQueueSize: number = 200; // 防止队列过大
+  public maxQueueSize: number = 5000; // 防止队列过大
 
   // 步数扩散系统
   public stepField: Int32Array; // 步数数组
@@ -212,6 +212,8 @@ class WatercolorEngine {
    */
   public clearCanvas(): void {
     this.p5Instance.background(255);
+    // 清空画布后需要重新同步pixels数组
+    this.p5Instance.loadPixels();
     initArrays(this);
   }
 
@@ -265,6 +267,8 @@ class WatercolorEngine {
       this.canvasWidth = this.canvas.clientWidth;
       this.canvasHeight = this.canvas.clientHeight;
       this.p5Instance.resizeCanvas(this.canvasWidth, this.canvasHeight);
+      // 调整画布大小后需要重新同步pixels数组
+      this.p5Instance.loadPixels();
       initArrays(this);
     }
   }

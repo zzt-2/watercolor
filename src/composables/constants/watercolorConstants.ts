@@ -1,5 +1,5 @@
 // 更新半径
-export const UpdateRadius = 1.6;
+export const UpdateRadius = 1.5;
 
 // 湿区场参数
 export const wetAreaRadiusFactor = 1.0; // 湿区半径为笔刷半径的倍数

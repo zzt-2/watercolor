@@ -964,12 +964,14 @@ function fastColorLerp(color1: number[], color2: number[], t: number): [number, 
 
 export function render(engine: WatercolorEngine): void {
   // PERF_TIMER_START - 渲染计时
-  const timer = startTimer('render');
+  let timer = startTimer('PigmentSmoothing');
   
   // 在渲染前对最终颜料场进行平滑
   applyFinalPigmentSmoothing(engine);
-  
-  engine.p5Instance.loadPixels();
+
+  endTimer(timer);
+
+  timer = startTimer('BeforeRender1');
   const { left, right, top, bottom } = engine.getRegion(
     engine.brushCenterX,
     engine.brushCenterY,
@@ -985,19 +987,21 @@ export function render(engine: WatercolorEngine): void {
   const thirdLayerPersistentField = engine.thirdLayerPersistentField;
   const canvasWidth = engine.canvasWidth;
 
+  endTimer(timer);
+
+  timer = startTimer('BeforeRender2');
+
   for (let x = left; x <= right; x++) {
     for (let y = top; y <= bottom; y++) {
+      const dx = x - engine.brushCenterX;
+      const dy = y - engine.brushCenterY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > engine.brushRadius * engine.UpdateRadius) continue;
+
       const index = x + y * canvasWidth;
       const pix = index * 4;
 
-      // // // 测试模式：如果测试层有值，直接显示白色
-      // if (engine.debugTestLayer[index] > 0.1) {
-      //   pixels[pix] = 255;     // R
-      //   pixels[pix + 1] = 255; // G  
-      //   pixels[pix + 2] = 255; // B
-      //   pixels[pix + 3] = 255; // A
-      //   continue; // 跳过正常渲染
-      // }
 
       // PERF_OPTIMIZATION - 缓存字段访问，减少重复查找
       const pigmentData = pigmentField[index].pigmentData;
@@ -1048,11 +1052,20 @@ export function render(engine: WatercolorEngine): void {
         pixels[pix] = renderColor[0];
         pixels[pix + 1] = renderColor[1];
         pixels[pix + 2] = renderColor[2];
+
+        // pixels[pix] = 0;
+        // pixels[pix + 1] = 0;
+        // pixels[pix + 2] = 0;
       }
     }
   }
 
-  engine.p5Instance.updatePixels();
+  endTimer(timer);
+
+  timer = startTimer('RenderPixels');
+
+  // 使用带参数的updatePixels只更新修改的区域，提升性能
+  engine.p5Instance.updatePixels(left, top, right - left + 1, bottom - top + 1);
   
   // PERF_TIMER_END - 渲染计时结束
   endTimer(timer);

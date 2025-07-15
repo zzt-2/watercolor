@@ -25,6 +25,7 @@ declare module "p5" {
     pixels: number[];
     loadPixels(): void;
     updatePixels(): void;
+    updatePixels(x: number, y: number, width: number, height: number): void;
 
     // 其他方法
     save(filename: string): void;

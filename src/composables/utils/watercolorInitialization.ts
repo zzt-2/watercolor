@@ -17,6 +17,7 @@ export function initP5(engine: WatercolorEngine): void {
       );
       p.pixelDensity(1);
       p.background(255);
+      p.loadPixels();
       engine.initArrays();
     };
 
