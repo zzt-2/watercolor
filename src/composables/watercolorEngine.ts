@@ -71,6 +71,12 @@ class WatercolorEngine {
   public UpdateRadius = UpdateRadius;
   public edgeDetectionRadiusFactor = edgeDetectionRadiusFactor;
 
+  // 融合比例控制
+  public blendRatio: number = 0.5; // 默认融合比例为0.5
+
+  // 颜料浓度控制
+  public pigmentConcentration: number = 1; // 默认颜料浓度为1
+
   // 新增边缘效果相关字段
   public firstLayerEdgeField: Float32Array; // 第一层，全画布持久边缘
   public secondLayerEdgeField: Float32Array; // 第二层，笔刷局部边缘
@@ -257,6 +263,22 @@ class WatercolorEngine {
         opacity: this.brush.opacity,
       }));
     console.log("setBrushSize", this.brush.size);
+  }
+
+  /**
+   * 设置融合比例
+   */
+  public setBlendRatio(ratio: number): void {
+    this.blendRatio = Math.max(0, Math.min(1, ratio)); // 确保在0-1范围内
+    console.log("setBlendRatio", this.blendRatio);
+  }
+
+  /**
+   * 设置颜料浓度
+   */
+  public setPigmentConcentration(concentration: number): void {
+    this.pigmentConcentration = Math.max(0, Math.min(1, concentration)); // 确保在0-1范围内
+    console.log("setPigmentConcentration", this.pigmentConcentration);
   }
 
   /**

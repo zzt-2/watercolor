@@ -47,7 +47,7 @@ export function setUniformPigmentDistribution(
   // 计算基于笔画计数的不透明度系数
   const opacityFactor =
     // 0.5 + 0.5 * Math.min(1, engine.strokeCount / engine.maxStrokeCount);
-    0.5;
+    engine.pigmentConcentration;
 
   // 确保lastBrushPigment数组尺寸足够
   const brushSize = (2 * radius + 1) * (2 * radius + 1);

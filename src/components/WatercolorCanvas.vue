@@ -69,15 +69,71 @@
           <div class="color-values">
             RGB({{ customColor.r }}, {{ customColor.g }}, {{ customColor.b }})
           </div>
+          
+          <!-- RGB输入框 -->
+          <div class="rgb-inputs">
+            <div class="rgb-input-group">
+              <label>R:</label>
+              <input 
+                type="number" 
+                min="0" 
+                max="255" 
+                v-model.number="customColor.r"
+                @input="updateCustomColorFromRGB"
+                class="rgb-input"
+              />
+            </div>
+            <div class="rgb-input-group">
+              <label>G:</label>
+              <input 
+                type="number" 
+                min="0" 
+                max="255" 
+                v-model.number="customColor.g"
+                @input="updateCustomColorFromRGB"
+                class="rgb-input"
+              />
+            </div>
+            <div class="rgb-input-group">
+              <label>B:</label>
+              <input 
+                type="number" 
+                min="0" 
+                max="255" 
+                v-model.number="customColor.b"
+                @input="updateCustomColorFromRGB"
+                class="rgb-input"
+              />
+            </div>
+          </div>
+          
           <button @click="applyCustomColor" class="apply-btn">应用颜色</button>
         </div>
       </div>
 
-      <div class="brush-size">
-        <h3>笔刷大小</h3>
-        <div class="size-control">
-          <span class="size-value">{{ brushSize }}</span>
-          <input type="range" min="1" max="30" v-model.number="brushSize" />
+      <div class="brush-controls">
+        <div class="brush-size">
+          <h3>笔刷大小</h3>
+          <div class="size-control">
+            <span class="size-value">{{ brushSize }}</span>
+            <input type="range" min="1" max="30" v-model.number="brushSize" />
+          </div>
+        </div>
+
+        <div class="blend-ratio">
+          <h3>融合比例</h3>
+          <div class="size-control">
+            <span class="size-value">{{ Math.round(blendRatio * 100) }}%</span>
+            <input type="range" min="0" max="1" step="0.01" v-model.number="blendRatio" />
+          </div>
+        </div>
+
+        <div class="pigment-concentration">
+          <h3>颜料浓度</h3>
+          <div class="size-control">
+            <span class="size-value">{{ Math.round(pigmentConcentration * 100) }}%</span>
+            <input type="range" min="0" max="1" step="0.01" v-model.number="pigmentConcentration" />
+          </div>
         </div>
       </div>
 
@@ -190,6 +246,12 @@ const selectedColor = reactive<ColorOption>(availableColors[0]);
 // 笔刷大小
 const brushSize = ref(10);
 
+// 融合比例
+const blendRatio = ref(0.5);
+
+// 颜料浓度
+const pigmentConcentration = ref(1);
+
 // 色相选择交互
 function onHueClick(event: MouseEvent) {
   if (!hueBar.value) return;
@@ -294,6 +356,19 @@ watch(brushSize, (newSize: number) => {
   }
 });
 
+watch(blendRatio, (newRatio: number) => {
+  if (watercolorEngine) {
+    watercolorEngine.setBlendRatio(newRatio);
+  }
+});
+
+
+watch(pigmentConcentration, (newConcentration: number) => {
+  if (watercolorEngine) {
+    watercolorEngine.setPigmentConcentration(newConcentration);
+  }
+});
+
 // 从HSL更新RGB颜色
 function updateCustomColorFromHSL() {
   // 将HSL转换为RGB
@@ -301,6 +376,20 @@ function updateCustomColorFromHSL() {
   customColor.r = rgb.r;
   customColor.g = rgb.g;
   customColor.b = rgb.b;
+}
+
+// 从RGB更新HSL颜色
+function updateCustomColorFromRGB() {
+  // 确保RGB值在有效范围内
+  customColor.r = Math.max(0, Math.min(255, customColor.r || 0));
+  customColor.g = Math.max(0, Math.min(255, customColor.g || 0));
+  customColor.b = Math.max(0, Math.min(255, customColor.b || 0));
+  
+  // 将RGB转换为HSL
+  const hsl = RGB2HSL(customColor.r, customColor.g, customColor.b);
+  customColorHSL.h = hsl.h;
+  customColorHSL.s = hsl.s;
+  customColorHSL.l = hsl.l;
 }
 
 // 应用自定义颜色
@@ -513,6 +602,48 @@ h3 {
   font-size: 12px;
   text-align: center;
   color: #aaa;
+}
+
+.rgb-inputs {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.rgb-input-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.rgb-input-group label {
+  font-size: 12px;
+  color: #aaa;
+  font-weight: 500;
+}
+
+.rgb-input {
+  width: 100%;
+  height: 28px;
+  padding: 4px 6px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background-color: #333;
+  color: white;
+  font-size: 12px;
+  text-align: center;
+  transition: border-color 0.2s;
+}
+
+.rgb-input:focus {
+  outline: none;
+  border-color: #27ae60;
+}
+
+.rgb-input:hover {
+  border-color: #555;
 }
 
 .apply-btn {

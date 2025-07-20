@@ -38,7 +38,7 @@ export function updatePigmentField(engine: WatercolorEngine): void {
       }
 
       const newPigment = engine.newPigmentField[index].pigmentData;
-      const newOpacity = newPigment.opacity;
+      const newOpacity = newPigment.opacity * engine.pigmentConcentration;
 
       // 检查是否有已有颜料并混合
       if (engine.pigmentField[index].isOld) {
@@ -87,8 +87,8 @@ export function updatePigmentField(engine: WatercolorEngine): void {
   );
 
   // 保留原有颜色的比例
-  const retentionRatio = 0.01; // averageColor占小比例
-  const innerCircleRadiusFactor = 1; // 内圈半径因子
+  const retentionRatio = Math.pow(engine.blendRatio, 3); // averageColor占小比例
+  const innerCircleRadiusFactor = 0.5; // 内圈半径因子
 
   // 1. 在内圈区域计算平均颜色
   let totalR = 0,
